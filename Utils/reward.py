@@ -14,6 +14,9 @@ from rdkit.Chem import AllChem, QED, DataStructs, Descriptors
 
 from Utils.sascore import calculateScore
 
+import time
+from joblib import load
+
 
 def getReward(name, init_smiles):
     if name == "QED":
@@ -104,3 +107,70 @@ class QEDReward(Reward):
 
         return score
 
+class DockingReward(Reward):
+    def __init__(self, *args, **kwargs):
+        super(DockingReward, self).__init__(*args, **kwargs)
+        self.vmin = 0
+
+    def reward(self, smiles, dataDir:str):
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            score = 1
+            return score
+        del mol
+        # create SMILES file
+        with open(dataDir+'./workspace/ligand.smi','w') as f:
+            f.write(smiles)
+        # save produced ligands
+        with open(dataDir+'./output/allLigands.txt','a', newline="\n") as f:
+            f.write(smiles+"\n") 
+
+         # convert SMILES > PDBQT
+        # --gen3d: the option for generating 3D coordinate
+        #  -h: protonation
+        
+        try:
+            cvt_log = open(dataDir+"workspace/cvt_log.txt","w")
+            cvt_cmd = ["obabel", dataDir+"workspace/ligand.smi" ,"-O",dataDir+"workspace/ligand.pdbqt" ,"--gen3D","-p"]
+            subprocess.run(cvt_cmd, stdin=None, input=None, stdout=cvt_log, stderr=None, shell=False, timeout=300, check=False, universal_newlines=False)
+            cvt_log.close()
+        except:
+            f = open(dataDir+"present/error_output.txt", 'a')
+            print("cvt_error: ", time.asctime( time.localtime(time.time()) ),file=f)
+            print(traceback.print_exc(),file=f)
+            f.close()
+        # docking simulation
+        try:
+            vina_log = open(dataDir+"workspace/log_docking.txt","w")
+            docking_cmd =["vina --config "+dataDir+"./input/vina_config.txt --num_modes=1 --receptor="+dataDir+"./input/"+proteinName+" --ligand="+dataDir+"./workspace/ligand.pdbqt"]#TODO: direct acess to protein file
+            subprocess.run(docking_cmd, stdin=None, input=None, stdout=vina_log, stderr=None, shell=True, timeout=600, check=False, universal_newlines=False)
+            vina_log.close()
+            data = pd.read_csv(dataDir+'workspace/log_docking.txt', sep= "\t",header=None)
+            score = round(float(data.values[-2][0].split()[1]),2)
+        except:
+            f = open(dataDir+"./present/error_output.txt", 'a')
+            print("vina_error: ", time.asctime( time.localtime(time.time()) ),file=f)
+            print(traceback.print_exc(),file=f)
+            f.close()
+        assert score < 10**10
+
+
+        return score
+
+class ToxicityReward(Reward):
+    def __init__(self, *args, **kwargs):
+        super(ToxicityReward, self).__init__(*args, **kwargs)
+        self.vmin = 0
+        self.model = load("./Utils/etoxpred_best_model.joblib")
+
+    def reward(self, smiles):
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return -1
+        
+        mol = Chem.AddHs(mol)
+        fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=1024)
+        fp_string = fp.ToBitString()
+        tmpX = np.array(list(fp_string),dtype=float)
+        tox_score = eToxPredModel.predict_proba(tmpX.reshape((1,1024)))[:,1]
+        return 1 - tox_score[0]
