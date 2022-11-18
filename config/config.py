@@ -45,14 +45,16 @@ class MCTSConfig:
     n_step: int = 1000
     n_iter: int = 3
     seq_len: int = 25
-    in_smiles_file: str = "/Data/input/init_smiles.smi"
+    in_smiles_file: str = "/Data/input/init_smiles.smi" #TODO: merge to data_dir
     rep_file: str = ""
     modeL_dir: str = "/ckpt/"
-    out_dir: str = "/Data/output/"
+    out_dir: str = "/Data/output/" # TODO: merge to data_dir
     ucb_c: float = 1/math.sqrt(2)
     model_ver: int = 100
-    reward_name: str = "PLogP"
     model_dir: str = "/ckpt/"
+    reward_name: str = "PLogP"
+    reward_list: list[str] = field(default_factory=lambda:['Docking', 'QED', 'Toxicity'])# choose from QED, PLogP, Docking, Toxicity
+    data_dir: str = "/Data/"
 
 
 @dataclass

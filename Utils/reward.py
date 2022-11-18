@@ -23,6 +23,12 @@ def getReward(name, init_smiles):
         return QEDReward()
     elif name == "PLogP":
         return PenalizedLogPReward()
+    elif name == "Docking":
+        return DockingReward()
+    elif name == "Toxicity":
+        return ToxicityReward()
+    else:
+        raise NotImplementedError()
 
 
 class Reward:
