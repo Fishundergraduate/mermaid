@@ -1,0 +1,84 @@
+pareto size:1
+Updated pareto front
+[[0.412, 0.6756891260163925, 0.43246626232909513]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2ccccc2C(=O)(NC[C@@H]2CCOCC2))c(=O)c2cccn21']
+Time:Sat Nov 19 21:52:16 2022
+pareto size:1
+Updated pareto front
+[[0.415, 0.4519779352761481, 0.4350682946117379]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2([NH+](C)[C@@H])cccc2C(=O)NCCc2ccccc2)c(=O)c2cccn21']
+Time:Sat Nov 19 21:57:47 2022
+pareto size:1
+Updated pareto front
+[[0.441, 0.38212938464456336, 0.4392702591436515]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2(N)NC(=O)cccc2C(=O)NCCc2ccccc2)c(=O)c2cccn21']
+Time:Sat Nov 19 22:07:39 2022
+pareto size:1
+Updated pareto front
+[[0.454, 0.37272073566890596, 0.40983140857271994]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2c(C#N)[C@@H](c3ccc(Cl)cc3)cc2C(=O)NCCc2ccccc2)c(=O)c2cccn21']
+Time:Sat Nov 19 22:17:45 2022
+pareto size:1
+Updated pareto front
+[[0.398, 0.5259430785377762, 0.40912193004070685]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2ccccc2C(C(=O)C[C@H])c2ccccc2)c(=O)c2cccn21']
+Time:Sat Nov 19 22:19:34 2022
+pareto size:1
+Updated pareto front
+[[0.422, 0.3050933076282033, 0.44539093846176936]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2ccccc2C(=O)NCC(CC(C)CC[S@](=O))c2ccccc2)c(=O)c2cccn21']
+Time:Sat Nov 19 22:21:09 2022
+pareto size:1
+Updated pareto front
+[[0.432, 0.43118513364627076, 0.47191005729425395]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2ccccc2C(=O)NCCc2ccccc2)c(=O)c2cc(/N=C)cn21']
+Time:Sat Nov 19 22:24:44 2022
+pareto size:1
+Updated pareto front
+[[0.438, 0.56630737112724, 0.38380582119226914]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2c(/N)cc2C(=O)NCCc2ccccc2)c(=O)c2cccn21']
+Time:Sat Nov 19 22:30:51 2022
+pareto size:1
+Updated pareto front
+[[0.432, 0.4700483628514772, 0.49196931461242965]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2ccccc2C(=O)NCCc2c(NC(=O))cc2)c(=O)c2cccn21']
+Time:Sat Nov 19 22:38:13 2022
+pareto size:1
+Updated pareto front
+[[0.39, 0.26264725464756644, 0.4386507117607522]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2ccccc2C(=O)N(C[NH+](C[C@H](C)C)[C@H](Cl))c2ccccc2)c(=O)c2cccn21']
+Time:Sat Nov 19 22:44:12 2022
+pareto size:1
+Updated pareto front
+[[0.415, 0.41128243288110705, 0.4420537499809889]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2ccccc2C(=O)N(n2C[C@H]2C(=O)N(C)C)c2ccccc2)c(=O)c2cccn21']
+Time:Sat Nov 19 22:44:53 2022
+pareto size:1
+Updated pareto front
+[[0.405, 0.38711346069552716, 0.4318268237587315]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2ccccc2C(=O)NCC(CNc2ncccc2C)=O)c2cccn21']
+Time:Sat Nov 19 22:48:24 2022
+pareto size:1
+Updated pareto front
+[[0.422, 0.44814308384871954, 0.4714439360866929]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2(O[C@H]3CCCO[C@H]3C)cccc2C(=O)NCCc2ccccc2)c(=O)c2cccn21']
+Time:Sun Nov 27 01:32:25 2022
+pareto size:1
+Updated pareto front
+[[0.444, 0.4062176175575096, 0.4391575064452894]]
+Pareto Ligands
+['Cn1cc(C(=O)Nc2ccccc2C(=O)NCCc2ccccc2)c(=O)c2ccc([C@H]3CCCc3)n21']
+Time:Sun Nov 27 01:50:59 2022

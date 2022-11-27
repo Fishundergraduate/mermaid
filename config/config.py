@@ -1,7 +1,9 @@
 import math
 
 from hydra.core.config_store import ConfigStore
-from dataclasses import dataclass
+
+from dataclasses import dataclass, field
+from typing import List
 
 
 @dataclass
@@ -53,8 +55,14 @@ class MCTSConfig:
     model_ver: int = 100
     model_dir: str = "/ckpt/"
     reward_name: str = "PLogP"
-    reward_list: list[str] = field(default_factory=lambda:['Docking', 'QED', 'Toxicity'])# choose from QED, PLogP, Docking, Toxicity
-    data_dir: str = "/Data/"
+    data_dir: str = "/data_templete/"
+
+@dataclass
+class RewardConfig:
+    protein_name: str = "6lu7"+"_prepared"
+    reward_list: List[str] = field(default_factory=lambda: ['Docking', 'QED', 'Toxicity'])# choose from QED, PLogP, Docking, Toxicity
+    etoxpred_model: str = "/Utils/etoxpred_best_model.joblib"
+    
 
 
 @dataclass
@@ -63,6 +71,7 @@ class Config:
     model: ModelConfig = ModelConfig()
     train: TrainConfig = TrainConfig()
     mcts: MCTSConfig = MCTSConfig()
+    reward: RewardConfig = RewardConfig()
 
 
 cs = ConfigStore.instance()

@@ -14,7 +14,9 @@ import torch
 import hydra
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+# Load Configure
+from omegaconf import DictConfig, OmegaConf
+from config.config import Config
 # Vocabulary
 VOCABULARY = [
     'PAD',
@@ -36,13 +38,14 @@ atoms = ["H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al",
 
 class Node:
     def __init__(self):
+        self.dimension = len(OmegaConf.structured(Config)["reward"]["reward_list"])
         self.parent = None
         self.path = []
         self.depth = -100
         self.visit = 0
         self.children = []
-        self.imm_score = 0
-        self.cum_score = 0
+        self.imm_score = list(np.zeros(self.dimension))
+        self.cum_score = list(np.zeros(self.dimension))
         self.c = 1
         self.id = -1
         self.rollout_result = ("None", -1000)
@@ -54,18 +57,19 @@ class Node:
         c.path.append(c.token)
         self.children.append(c)
 
-    @hydra
+    #@hydra
     def _calc_UCB(self):
         if self.visit == 0:
-            ucb = [1e+6,1e+6,1e+6]
+            ucb = [1e+6 for i in range(self.dimension)]
         else:
-            ucb = self.cum_score/self.visit + self.c*math.sqrt(2*math.log(self.parent.visit)/self.visit)
+            ucb = [win/self.visit + math.sqrt(2*math.log(self.visit)/ self.visit) for win in self.cum_score ]
+            #ucb = self.cum_score/self.visit + self.c*math.sqrt(2*math.log(self.parent.visit)/self.visit)
         return ucb
 
-    def select_children(self):
+    def select_children(self, pareto):
         children_ucb = []
         for cn in self.children:
-            children_ucb.append(cn._calc_UCB())
+            children_ucb.append(pareto.wcal(cn._calc_UCB(), self.cum_score))## TODO: ERROR HERE
         max_ind = np.random.choice(np.where(np.array(children_ucb) == max(children_ucb))[0])
         return self.children[max_ind]
 

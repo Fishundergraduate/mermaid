@@ -16,9 +16,17 @@ from Utils.sascore import calculateScore
 
 import time
 from joblib import load
+import hydra
+from omegaconf import DictConfig, OmegaConf
+from config.config import Config
+#TO Docking
+import traceback
+from rdkit import rdBase
+import pandas as pd
+import subprocess
+import numpy as np
 
-
-def getReward(name, init_smiles):
+def getReward(name):
     if name == "QED":
         return QEDReward()
     elif name == "PLogP":
@@ -30,6 +38,8 @@ def getReward(name, init_smiles):
     else:
         raise NotImplementedError()
 
+def getRewards(nameList: list):
+    return [getReward(name) for name in nameList]
 
 class Reward:
     def __init__(self):
@@ -116,19 +126,21 @@ class QEDReward(Reward):
 class DockingReward(Reward):
     def __init__(self, *args, **kwargs):
         super(DockingReward, self).__init__(*args, **kwargs)
-        self.vmin = 0
+        self.vmin = -1
+        self.dataDir = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]
+        self.proteinName = OmegaConf.structured(Config)["reward"]["protein_name"]
 
-    def reward(self, smiles, dataDir:str):
+    def reward(self, smiles):
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            score = 1
+            score = self.vmin
             return score
         del mol
         # create SMILES file
-        with open(dataDir+'./workspace/ligand.smi','w') as f:
+        with open(self.dataDir+'./workspace/ligand.smi','w') as f:
             f.write(smiles)
         # save produced ligands
-        with open(dataDir+'./output/allLigands.txt','a', newline="\n") as f:
+        with open(self.dataDir+'./output/allLigands.txt','a', newline="\n") as f:
             f.write(smiles+"\n") 
 
          # convert SMILES > PDBQT
@@ -136,38 +148,42 @@ class DockingReward(Reward):
         #  -h: protonation
         
         try:
-            cvt_log = open(dataDir+"workspace/cvt_log.txt","w")
-            cvt_cmd = ["obabel", dataDir+"workspace/ligand.smi" ,"-O",dataDir+"workspace/ligand.pdbqt" ,"--gen3D","-p"]
+            cvt_log = open(self.dataDir+"workspace/cvt_log.txt","w")
+            cvt_cmd = ["obabel", self.dataDir+"workspace/ligand.smi" ,"-O",self.dataDir+"workspace/ligand.pdbqt" ,"--gen3D","-p"]
             subprocess.run(cvt_cmd, stdin=None, input=None, stdout=cvt_log, stderr=None, shell=False, timeout=300, check=False, universal_newlines=False)
             cvt_log.close()
+            score = self.vmin
+            return score
         except:
-            f = open(dataDir+"present/error_output.txt", 'a')
+            f = open(self.dataDir+"present/error_output.txt", 'a')
             print("cvt_error: ", time.asctime( time.localtime(time.time()) ),file=f)
             print(traceback.print_exc(),file=f)
             f.close()
         # docking simulation
         try:
-            vina_log = open(dataDir+"workspace/log_docking.txt","w")
-            docking_cmd =["vina --config "+dataDir+"./input/vina_config.txt --num_modes=1 --receptor="+dataDir+"./input/"+proteinName+" --ligand="+dataDir+"./workspace/ligand.pdbqt"]#TODO: direct acess to protein file
+            vina_log = open(self.dataDir+"workspace/log_docking.txt","w")
+            docking_cmd =["vina --config "+self.dataDir+"./input/"+self.proteinName+"_vina_config.txt --num_modes=1 --receptor="+self.dataDir+"./input/"+self.proteinName+".pdbqt --ligand="+self.dataDir+"./workspace/ligand.pdbqt"]#TODO: direct acess to protein file
             subprocess.run(docking_cmd, stdin=None, input=None, stdout=vina_log, stderr=None, shell=True, timeout=600, check=False, universal_newlines=False)
             vina_log.close()
-            data = pd.read_csv(dataDir+'workspace/log_docking.txt', sep= "\t",header=None)
+            data = pd.read_csv(self.dataDir+'workspace/log_docking.txt', sep= "\t",header=None)
             score = round(float(data.values[-2][0].split()[1]),2)
         except:
-            f = open(dataDir+"./present/error_output.txt", 'a')
+            f = open(self.dataDir+"./present/error_output.txt", 'a')
             print("vina_error: ", time.asctime( time.localtime(time.time()) ),file=f)
             print(traceback.print_exc(),file=f)
             f.close()
+            score = self.vmin
+            return score
         assert score < 10**10
 
-
-        return score
+        base_dock_score = 0
+        return -round(((score - base_dock_score)*0.1)/(1+abs((score - base_dock_score)*0.1)),3)
 
 class ToxicityReward(Reward):
     def __init__(self, *args, **kwargs):
         super(ToxicityReward, self).__init__(*args, **kwargs)
         self.vmin = 0
-        self.model = load("./Utils/etoxpred_best_model.joblib")
+        self.model = load(hydra.utils.get_original_cwd()+ OmegaConf.structured(Config)["reward"]["etoxpred_model"])
 
     def reward(self, smiles):
         mol = Chem.MolFromSmiles(smiles)
@@ -178,5 +194,5 @@ class ToxicityReward(Reward):
         fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=1024)
         fp_string = fp.ToBitString()
         tmpX = np.array(list(fp_string),dtype=float)
-        tox_score = eToxPredModel.predict_proba(tmpX.reshape((1,1024)))[:,1]
+        tox_score = self.model.predict_proba(tmpX.reshape((1,1024)))[:,1]
         return 1 - tox_score[0]

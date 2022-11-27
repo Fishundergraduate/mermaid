@@ -21,11 +21,23 @@ from rdkit.six.moves import cPickle
 import torch.nn.functional as F
 
 from Model.model import RolloutNetwork
-from Utils.utils import read_smilesset, parse_smiles, convert_smiles, RootNode, ParentNode, NormalNode, \
+from Utils.pareto_utils import read_smilesset, parse_smiles, convert_smiles, RootNode, ParentNode, NormalNode, \
     trans_infix_ringnumber
 from Utils.utils import VOCABULARY
-from Utils.reward import getReward
+from Utils.reward import getReward, getRewards
 from Utils.sascore import calculateScore
+
+import json
+# Load Configure
+from omegaconf import DictConfig, OmegaConf
+from config.config import Config
+# calc for pareto
+from pygmo import hypervolume
+import math
+import copy
+
+# for debug
+import pdb
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -318,13 +330,16 @@ class ParseSelectMCTS(MCTS):
 class ParseParetoSelectMCTS(MCTS):
     """Pareto Multi-objective optimization Monte Carlo Tree Search class
     """
-    def __init__(self, *args, **kwargs):
-        super(ParseSelectMCTS, self).__init__(*args, **kwargs)
+    def __init__(self, init_smiles, model, vocab, Reward, Pareto, max_seq=81, c=1, num_prll=256, limit=5, step=0, n_valid=0,
+                 n_invalid=0, sampling_max=False, max_r=-1000):
+        super(ParseParetoSelectMCTS, self).__init__(init_smiles, model, vocab, Reward, max_seq, c, num_prll, limit, step, n_valid,
+                 n_invalid, sampling_max, max_r)
         self.root = RootNode()
         self.current_node = None
         self.next_token = {}
         self.rollout_result = {}
         self.l_replace = int(len(self.init_smiles)/4)
+        self.pareto = Pareto
 
     def select(self):
         """
@@ -332,12 +347,12 @@ class ParseParetoSelectMCTS(MCTS):
         """
         self.current_node = self.root
         while len(self.current_node.children) != 0:
-            self.current_node = self.current_node.select_children()
+            self.current_node = self.current_node.select_children(self.pareto)
             if self.current_node.depth+1 > self.max_seq:
                 tmp = self.current_node
                 # update
                 while self.current_node is not None:
-                    self.current_node.cum_score += -1
+                    self.current_node.cum_score = list(np.array(self.current_node.cum_score) + np.array([1 for i in range(self.current_node.dimension) ]))
                     self.current_node.visit += 1
                     self.current_node = self.current_node.parent
                 tmp.remove_Node()
@@ -389,18 +404,21 @@ class ParseParetoSelectMCTS(MCTS):
             pref, suf = original_smiles.split("*")
             inf = "".join(self.current_node.path[3:])
             smiles_concat = pref + trans_infix_ringnumber(pref, inf) + suf
+            sascore = calculateScore(Chem.MolFromSmiles(smiles_concat))
+            if sascore <= 3.5:
+                score = self.Reward.reward(smiles_concat)
 
-            score = self.Reward.reward(smiles_concat)
-
-            self.max_score = max(self.max_score, score)
-            self.next_token.pop("\n")
-            if score > -100:
-                self.valid_smiles["%d:%s" % (-self.step, smiles_concat)] = score
-                print(score, smiles_concat)
-                self.max_score = max(self.max_score, score)
-                self.n_valid += 1
-            else:
-                self.n_invalid += 1
+                #self.max_score = max(self.max_score, score)
+                self.next_token.pop("\n")
+                if score > -100:
+                    self.valid_smiles["%d:%s" % (-self.step, smiles_concat)] = score
+                    print(score, smiles_concat)
+                    #self.max_score = max(self.max_score, score)
+                    if pareto.dominated(score):
+                        pareto.Update(score, smiles_concat)
+                    self.n_valid += 1
+                else:
+                    self.n_invalid += 1
 
         if len(self.next_token) < 1:
             self.current_node.cum_score = -100000
@@ -453,14 +471,27 @@ class ParseParetoSelectMCTS(MCTS):
                     inf = "".join(convert_smiles(x[i, 1:step+l-1], self.vocab, mode="i2s"))
                     smiles_concat = pref + trans_infix_ringnumber(pref, inf) + suf
 
-                    score = self.Reward.reward(smiles_concat)
+                    #score = self.Reward.reward(smiles_concat)
+                    scores = []
+                    for reward in self.Reward:
+                        scores.append(reward.reward(smiles_concat))
+                    score = scores[0]# for compatibility: TODO: Delete this line
 
-                    self.next_token[list(self.next_token.keys())[i]] = score
-                    self.rollout_result[list(self.next_token.keys())[i]] = (smiles_concat, score)
-                    if score > self.Reward.vmin:
+                    self.next_token[list(self.next_token.keys())[i]] = scores
+                    self.rollout_result[list(self.next_token.keys())[i]] = (smiles_concat, scores)
+                    flag = True
+                    #TODO: Write by lambda expr.
+                    for i, score in enumerate(scores):
+                        if score <= self.Reward[i].vmin:
+                            flag= False
+                            break
+                    
+                    if flag:
                         # self.valid_smiles[smiles_concat] = score
-                        self.valid_smiles["%d:%s" % (self.step, smiles_concat)] = score
-                        self.max_score = max(self.max_score, score)
+                        #self.valid_smiles["%d:%s" % (self.step, smiles_concat)] = score
+                        #self.max_score = max(self.max_score, score)
+                        if self.pareto.dominated(scores):
+                            self.pareto.update(scores, smiles_concat)
                         print(score, smiles_concat)
                         self.n_valid += 1
                     else:
@@ -478,12 +509,13 @@ class ParseParetoSelectMCTS(MCTS):
             except KeyError:
                 child.rollout_result = ("Termination", -10000)
             self.current_node.add_Node(child)
-        max_reward = max(self.next_token.values())
+        max_reward = list(np.max(np.array(list(self.next_token.values())), axis=0))
         # self.max_score = max(self.max_score, max_reward)
         while self.current_node is not None:
             self.current_node.visit += 1
-            self.current_node.cum_score += max_reward/(1+abs(max_reward))
-            self.current_node.imm_score = max(self.current_node.imm_score, max_reward/(1+abs(max_reward)))
+            #self.current_node.cum_score += max_reward/(1+abs(max_reward))
+            self.current_node.cum_score  = list(np.array(self.current_node.cum_score) + np.divide(np.array(max_reward), np.abs(np.array(max_reward))+ 1))
+            #self.current_node.imm_score = list(np.max(np.array(self.current_node.imm_score), np.divide(np.array(max_reward), 1+np.abs(np.array(max_reward)))))
             self.current_node = self.current_node.parent
 
     def search(self, n_step, epsilon=0.1, loop=10, gamma=0.90, rep_file=None):
@@ -503,6 +535,7 @@ class ParseParetoSelectMCTS(MCTS):
             if len(self.next_token) != 0:
                 self.simulate()
                 self.backprop()
+                self.logging()
 
     def set_repnode(self, rep_file=None):
         if len(rep_file) > 0:
@@ -565,6 +598,12 @@ class ParseParetoSelectMCTS(MCTS):
 
             df.to_csv(dir_path+f"/tree{i}.csv", index=False)
 
+    def logging(self):
+        """logging output compounds 
+        """
+        pass
+
+
 # add for PMOO
 class Pareto():
     """ParetoFront Class
@@ -576,31 +615,32 @@ class Pareto():
                 - front: reward score vectors in pareto front
                 - compounds: compounds in pareto front
         """
+        self.front = front if front is not None else [[0 for i in range(len(OmegaConf.structured(Config)["reward"]["reward_list"]))]]
+        self.compounds = compounds
+    def initialization_front(self):
+        if len(self.front) == 0:
+            self.front = [[0 for i in range(len(OmegaConf.structured(Config)["reward"]["reward_list"]))]]
+            self.compounds = ["cc"]
 
-    def Dominated(self, m):
+    def dominated(self, m):
         """Is point m dominated in reward space?
         
             Input
                 - m: reward vector to decide dominated or not
 
             Return
-                - T/F
+                - True: Dominated
+                - False: Non-dominated
         """
         if len(self.front) == 0:
-            return False
+            return True
         
         for p in self.front:
-            flag = True
-            for i in range(len(p)):
-                if m[i] >= p[i]:
-                    flag = False
-            if(flag):
+            if np.all(np.array(p) < np.array(m)):
                 return True
-        
         return False
     
-    #@hydra.main(config_path="../config/", config_name="config")
-    def Update(self, scores, compound):
+    def update(self, scores, compound):
         """Update Pareto front with new compound
 
             Input:
@@ -625,8 +665,7 @@ class Pareto():
         self.front.append(scores)
         self.compounds.append(compound)
         #TODO:;check dataDir works or not
-        global cfg
-        dataDir = cfg["mcts"]["out_dir"]
+        dataDir = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]
         with open(dataDir+"present/output.txt", 'a') as f:
             f.write(f"pareto size:{len(self.front)}\n")
             f.write(f"Updated pareto front\n{self.front}\n")
@@ -635,7 +674,7 @@ class Pareto():
         print(f"pareto size:{len(self.front)}")
     
     @staticmethod
-    def from_dict(_filename)
+    def from_dict(_filename):
         """Pareto front backup from files
             WARNING: you should check _filename file exists
             Input:
@@ -646,9 +685,77 @@ class Pareto():
         """
         with open(_filename, 'r') as f:
             _set_json = json.load(f)
-            new_pareto = pareto(front= _set_json['front'], compounds= _set_json['compounds'])
+            new_pareto = Pareto(front= _set_json['front'], compounds= _set_json['compounds'])
         print("Loaded Pareto Fronts")
+        new_pareto.initialization_front()
         return new_pareto
+
+    def wcal(self, ucb, reward):
+        """Calculate HyperVolume
+            Input: 
+                - ucb: Upper Confidence Bound
+                - reward: Thinking Reward Vector
+
+            Return:
+                - HyperVolume
+
+        """
+        
+        hv = self._hvcal(ucb)
+        if self.dominated(reward):
+            return hv - self.distance(ucb)
+        else:
+            return hv
+    
+    def _getAverage(self):
+        return list(np.array(self.front).mean(axis=0))
+
+    def distance(self, ucb):
+        """ Get sqrt distance
+            Input:
+                - ucb: Upper Confidence Bound
+            
+            Return:
+                - sqrt distance toward average point of Pareto Area.
+        """
+        avg = self._getAverage()
+        distance = 0
+        for i in range(len(avg)):
+            distance += pow(avg[i] - ucb[i],2)
+        return sqrt(distance)
+
+
+    def _hvcal(self, ucb):
+        """Calculate Hypervolume Indicator
+            Input:
+                - ucb: Upper Confidence Bound
+
+            Return:
+                - HyperVolume Indicator
+        """
+        if len(self.front) == 0:
+            return 0
+        _pareto_temp = copy.deepcopy(self.front)
+        _pareto_temp.append(ucb)
+        #print(_pareto_temp,ucb, "line 739")
+        for i in range(len(_pareto_temp)):
+            for j in range(len(_pareto_temp[0])):
+                if(_pareto_temp[i][j]>0):
+                    _pareto_temp[i][j] *= -1
+                else:
+                    _pareto_temp[i][j] = -0.00000000000000001
+        hv = hypervolume(_pareto_temp)
+        ref_point = list(np.zeros_like(_pareto_temp[0]))
+        try:
+            hvnum = hv.compute(ref_point)
+        except:
+            with open(hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]+"./present/hverror_output.txt", 'a') as f:
+                print(time.asctime( time.localtime(time.time()) ),file=f)
+                print(pareto.front,file=f)
+            return 0
+        return hvnum
+
+
 
 
 
@@ -672,14 +779,18 @@ def main(cfg: DictConfig):
         model.load_state_dict(torch.load(hydra.utils.get_original_cwd() + cfg["mcts"]["model_dir"]
                                          + f"model-ep{model_ver}.pth",  map_location=torch.device('cpu')))
 
-        reward = getReward(name=cfg["mcts"]["reward_name"], init_smiles=start_smiles)
-
+        reward = getReward(name=cfg["mcts"]["reward_name"])#, init_smiles=start_smiles)
+        rewards = getRewards(nameList=cfg["reward"]["reward_list"])
+        pareto = Pareto.from_dict(hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]+"/present/pareto.json")
         input_smiles = start_smiles
         start = time.time()
         for i in range(cfg["mcts"]["n_iter"]):
-            mcts = ParseSelectMCTS(input_smiles, model=model, vocab=vocab, Reward=reward,
+            #mcts = ParseSelectMCTS(input_smiles, model=model, vocab=vocab, Reward=reward,
+            #                       max_seq=cfg["mcts"]["seq_len"], step=cfg["mcts"]["n_step"] * i,
+            #                       n_valid=n_valid, n_invalid=n_invalid, c=cfg["mcts"]["ucb_c"], max_r=reward.max_r)
+            mcts = ParseParetoSelectMCTS(input_smiles, model=model, vocab=vocab, Reward=rewards,
                                    max_seq=cfg["mcts"]["seq_len"], step=cfg["mcts"]["n_step"] * i,
-                                   n_valid=n_valid, n_invalid=n_invalid, c=cfg["mcts"]["ucb_c"], max_r=reward.max_r)
+                                   n_valid=n_valid, n_invalid=n_invalid, c=cfg["mcts"]["ucb_c"], max_r=reward.max_r, Pareto = pareto)
             mcts.search(n_step=cfg["mcts"]["n_step"] * (i + 1), epsilon=0, loop=10, rep_file=cfg["mcts"]["rep_file"])
             reward.max_r = mcts.max_score
             n_valid += mcts.n_valid

@@ -1,0 +1,12 @@
+{
+    "isLoadTree": true,
+    "whereisRNNmodelDir": "./model3/",
+    "limitTimeHours": 23,
+    "limitTimeMinutes": 0,
+    "limitTimeSeconds": 0,
+    "isUseeToxPred": true,
+    "proteinName": "6lu7_prepared.pdbqt",
+    "randomSeed": 333,
+    "saThreshold": 3.5,
+    "//": "eToxPred must be located in ligand_design/etoxpred_best_model.joblib"
+}
