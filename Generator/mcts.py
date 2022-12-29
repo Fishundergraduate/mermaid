@@ -22,9 +22,9 @@ import torch.nn.functional as F
 
 from Model.model import RolloutNetwork
 from Utils.pareto_utils import read_smilesset, parse_smiles, convert_smiles, RootNode, ParentNode, NormalNode, \
-    trans_infix_ringnumber
+    trans_infix_ringnumber, id
 from Utils.utils import VOCABULARY
-from Utils.reward import getReward, getRewards
+from Utils.reward import getReward, getRewards, DockingReward
 from Utils.sascore import calculateScore
 
 import json
@@ -38,6 +38,7 @@ import copy
 
 # for debug
 import pdb
+import csv
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -160,7 +161,7 @@ class ParseSelectMCTS(MCTS):
                 self.valid_smiles["%d:%s" % (-self.step, smiles_concat)] = score
                 print(score, smiles_concat)
                 self.max_score = max(self.max_score, score)
-                self.n_valid += 1
+                self.n_valid += 1# TODO: 1 ligands and scores outputter
             else:
                 self.n_invalid += 1
 
@@ -224,7 +225,7 @@ class ParseSelectMCTS(MCTS):
                         self.valid_smiles["%d:%s" % (self.step, smiles_concat)] = score
                         self.max_score = max(self.max_score, score)
                         print(score, smiles_concat)
-                        self.n_valid += 1
+                        self.n_valid += 1# TODO: 1 ligands and scores outputter
                     else:
                         # print("NO", smiles_concat)
                         self.n_invalid += 1
@@ -238,7 +239,7 @@ class ParseSelectMCTS(MCTS):
             try:
                 child.rollout_result = self.rollout_result[key]
             except KeyError:
-                child.rollout_result = ("Termination", -10000)
+                child.rollout_result = ("Termination", [-10000 for r in self.Reward])
             self.current_node.add_Node(child)
         max_reward = max(self.next_token.values())
         # self.max_score = max(self.max_score, max_reward)
@@ -330,7 +331,7 @@ class ParseSelectMCTS(MCTS):
 class ParseParetoSelectMCTS(MCTS):
     """Pareto Multi-objective optimization Monte Carlo Tree Search class
     """
-    def __init__(self, init_smiles, model, vocab, Reward, Pareto, max_seq=81, c=1, num_prll=256, limit=5, step=0, n_valid=0,
+    def __init__(self, init_smiles, model, vocab, Reward, Pareto, Config: DictConfig, max_seq=81, c=1, num_prll=256, limit=5, step=0, n_valid=0,
                  n_invalid=0, sampling_max=False, max_r=-1000):
         super(ParseParetoSelectMCTS, self).__init__(init_smiles, model, vocab, Reward, max_seq, c, num_prll, limit, step, n_valid,
                  n_invalid, sampling_max, max_r)
@@ -340,6 +341,7 @@ class ParseParetoSelectMCTS(MCTS):
         self.rollout_result = {}
         self.l_replace = int(len(self.init_smiles)/4)
         self.pareto = Pareto
+        self.Config = Config
 
     def select(self):
         """
@@ -347,7 +349,7 @@ class ParseParetoSelectMCTS(MCTS):
         """
         self.current_node = self.root
         while len(self.current_node.children) != 0:
-            self.current_node = self.current_node.select_children(self.pareto)
+            self.current_node = self.current_node.select_children(self.pareto, self.Config)
             if self.current_node.depth+1 > self.max_seq:
                 tmp = self.current_node
                 # update
@@ -404,20 +406,39 @@ class ParseParetoSelectMCTS(MCTS):
             pref, suf = original_smiles.split("*")
             inf = "".join(self.current_node.path[3:])
             smiles_concat = pref + trans_infix_ringnumber(pref, inf) + suf
-            sascore = calculateScore(Chem.MolFromSmiles(smiles_concat))
+            mol = Chem.MolFromSmiles(smiles_concat)
+            if mol is None:
+                #delKeyList.append(list(self.next_token.keys())[i])
+                #continue
+                return #TODO: check this code to delKey
+            elif not isinstance(mol, Chem.rdchem.Mol):
+                return
+            else:
+                smiles_concat = Chem.MolToSmiles(mol)
+            sascore = calculateScore(mol)
             if sascore <= 3.5:
-                score = self.Reward.reward(smiles_concat)
-
-                #self.max_score = max(self.max_score, score)
-                self.next_token.pop("\n")
-                if score > -100:
-                    self.valid_smiles["%d:%s" % (-self.step, smiles_concat)] = score
-                    print(score, smiles_concat)
+                scores = []
+                for reward in self.Reward:
+                    scores.append(reward.reward(smiles_concat))
+                score = scores[0]# for compatibility: TODO: Delete this lin
+                flag = True
+                #TODO: Write by lambda expr.
+                for i, score in enumerate(scores):
+                    if score <= self.Reward[i].vmin:
+                        flag= False
+                        break
+                
+                if flag:
+                    self.valid_smiles[smiles_concat] = scores
+                    self.valid_smiles["%d:%s" % (self.step, smiles_concat)] = scores
                     #self.max_score = max(self.max_score, score)
-                    if pareto.dominated(score):
-                        pareto.Update(score, smiles_concat)
+                    if self.pareto.dominated(scores):
+                        self.pareto.update(scores, smiles_concat, hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"])
+                    print(scores, smiles_concat)
+                    self.logging(scores=scores,compound=smiles_concat)
                     self.n_valid += 1
                 else:
+                    # print("NO", smiles_concat)
                     self.n_invalid += 1
 
         if len(self.next_token) < 1:
@@ -463,15 +484,31 @@ class ParseParetoSelectMCTS(MCTS):
 
             for i in range(len(x_len)):
                 x_len[i] += 1
-
+            delKeyList = []
             for i in range(len(self.next_token)):
                 x[i, step+l-1] = ind[i]
                 if is_terminator[i] and ind[i] == self.vocab.index("\n"):
                     is_terminator[i] = False
                     inf = "".join(convert_smiles(x[i, 1:step+l-1], self.vocab, mode="i2s"))
                     smiles_concat = pref + trans_infix_ringnumber(pref, inf) + suf
-
+                    mol = Chem.MolFromSmiles(smiles_concat)
+                    if mol is None:
+                        delKeyList.append(list(self.next_token.keys())[i])
+                        continue
+                    else:
+                        smiles_concat = Chem.MolToSmiles(mol)
+                    if not isinstance(smiles_concat, str):
+                        continue
                     #score = self.Reward.reward(smiles_concat)
+                    try:
+                        sascore = calculateScore(mol)
+                    except Exception as e:
+                        import traceback
+                        print(mol)
+                        traceback.print_exc()
+                        
+                    if sascore > 3.5:
+                        continue
                     scores = []
                     for reward in self.Reward:
                         scores.append(reward.reward(smiles_concat))
@@ -487,16 +524,19 @@ class ParseParetoSelectMCTS(MCTS):
                             break
                     
                     if flag:
-                        # self.valid_smiles[smiles_concat] = score
-                        #self.valid_smiles["%d:%s" % (self.step, smiles_concat)] = score
+                        self.valid_smiles[smiles_concat] = scores
+                        self.valid_smiles["%d:%s" % (self.step, smiles_concat)] = scores
                         #self.max_score = max(self.max_score, score)
                         if self.pareto.dominated(scores):
-                            self.pareto.update(scores, smiles_concat)
-                        print(score, smiles_concat)
+                            self.pareto.update(scores, smiles_concat, hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"])
+                        print(scores, smiles_concat)
+                        self.logging(scores=scores,compound=smiles_concat)
                         self.n_valid += 1
                     else:
                         # print("NO", smiles_concat)
                         self.n_invalid += 1
+            for key in delKeyList:
+                self.next_token.pop(key)
             step += 1
 
     def backprop(self):
@@ -509,6 +549,17 @@ class ParseParetoSelectMCTS(MCTS):
             except KeyError:
                 child.rollout_result = ("Termination", -10000)
             self.current_node.add_Node(child)
+        delKeyList = []
+        for key, value in self.next_token.items():
+            if not isinstance(value, list):
+                #print(f"Line480: ScoreError\t{key, value}")
+                delKeyList.append(key)
+        for key in delKeyList:
+            value = self.next_token.pop(key)
+            #print(f"L524: del key: {key}\t value: {value}")
+        #print(f"[pdb]:{self.next_token.keys()}\t values:{self.next_token.values()}")
+        if len(self.next_token) < 1:
+            return
         max_reward = list(np.max(np.array(list(self.next_token.values())), axis=0))
         # self.max_score = max(self.max_score, max_reward)
         while self.current_node is not None:
@@ -518,8 +569,11 @@ class ParseParetoSelectMCTS(MCTS):
             #self.current_node.imm_score = list(np.max(np.array(self.current_node.imm_score), np.divide(np.array(max_reward), 1+np.abs(np.array(max_reward)))))
             self.current_node = self.current_node.parent
 
-    def search(self, n_step, epsilon=0.1, loop=10, gamma=0.90, rep_file=None):
+    def search(self, n_step, epsilon=0.1, loop=10, gamma=0.90, rep_file=None, isLoadTree = False):
+        if isLoadTree:
+            self.root = ParseParetoSelectMCTS.load_tree(self = self, dataDir = hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"])
         self.set_repnode(rep_file=rep_file)
+        #n_step = max(self.pareto.n_step, n_step)
 
         while self.step < n_step:
             self.step += 1
@@ -535,7 +589,34 @@ class ParseParetoSelectMCTS(MCTS):
             if len(self.next_token) != 0:
                 self.simulate()
                 self.backprop()
-                self.logging()
+                #self.logging()
+            self.save_tree(hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"])
+            self.pareto.n_step = n_step
+            self.pareto.save_pareto(hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"])
+
+    def search_time(self, start_time, time_limit_sec=24*60*60, epsilon=0.1, loop=10, gamma=0.90, rep_file=None, isLoadTree = False):
+        if isLoadTree:
+            self.root = ParseParetoSelectMCTS.load_tree(self = self, dataDir = hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"])
+        self.set_repnode(rep_file=rep_file)
+        elapsed_time = 0
+        one_epoch_time = 0
+        while elapsed_time + one_epoch_time < time_limit_sec:
+            time_begin = time.time()
+            print(f"--- elapsed:{elapsed_time}\tremain:{time_limit_sec - elapsed_time} ---")
+            print("MAX_SCORE:", self.max_score)
+            if self.n_valid+self.n_invalid == 0:
+                valid_rate = 0
+            else:
+                valid_rate = self.n_valid/(self.n_valid+self.n_invalid)
+            print("Validity rate:", valid_rate)
+            self.select()
+            self.expand(epsilon=epsilon, loop=loop, gamma=gamma)
+            if len(self.next_token) != 0:
+                self.simulate()
+                self.backprop()
+            elapsed_time = time.time() - start_time
+            one_epoch_time = max(time.time() - time_begin, one_epoch_time)
+
 
     def set_repnode(self, rep_file=None):
         if len(rep_file) > 0:
@@ -560,17 +641,27 @@ class ParseParetoSelectMCTS(MCTS):
                         n.add_Node(c)
 
     def save_tree(self, dir_path):
+        """save tree to dir_path
+        Arg: dirpath: path to dataDir
+        
+        save to dataDir/output/tree_save/tree{}.csv
+        Return null
+        """
         for i in range(len(self.root.children)):
             stack = []
             stack.extend(self.root.children[i].children)
             sc = self.root.children[i].original_smiles
             score = [self.root.children[i].cum_score]
-            ids = [-1]
-            parent_id = [-1]
-            children_id = [[c.id for c in self.root.children[i].children]]
-            infix = [sc]
-            rollout_smiles = ["Scaffold"]
-            rollout_score = [-10000]
+            ids = [self.root.children[i].id]
+            parent_id = [self.root.id]
+            children_id = [str([c.id for c in self.root.children[i].children])]
+            infix = [str(self.root.children[i].path)]
+            rollout_smiles = [sc]
+            rollout_score = [[-10000 for c in range(self.root.dimension)]]
+            tokens = [self.root.children[i].token]
+            c_s = [self.root.children[i].c]
+            depths = [self.root.children[i].depth]
+            visits = [self.root.children[i].visit]
 
             while len(stack) > 0:
                 c = stack.pop(-1)
@@ -581,13 +672,17 @@ class ParseParetoSelectMCTS(MCTS):
                 score.append(c.cum_score)
                 ids.append(c.id)
                 parent_id.append(c.parent.id)
-                ch_id = [str(gc.id) for gc in c.children]
-                children_id.append(",".join(ch_id))
-                infix.append("".join(c.path))
+                ch_id = [gc.id for gc in c.children]
+                children_id.append(str(ch_id))
+                infix.append(str(c.path))
                 rollout_smiles.append(c.rollout_result[0])
                 rollout_score.append(c.rollout_result[1])
+                tokens.append(c.token)
+                c_s.append(c.c)
+                depths.append(c.depth)
+                visits.append(c.visit)
 
-            df = pd.DataFrame(columns=["ID", "Score", "P_ID", "C_ID", "Infix", "Rollout_SMILES", "Rollout_Score"])
+            df = pd.DataFrame(columns=["ID", "Score", "P_ID", "C_ID", "Infix", "Rollout_SMILES", "Rollout_Score", "Token", "C", "depth","visit"])
             df["ID"] = ids
             df["Score"] = score
             df["P_ID"] = parent_id
@@ -595,14 +690,139 @@ class ParseParetoSelectMCTS(MCTS):
             df["Infix"] = infix
             df["Rollout_SMILES"] = rollout_smiles
             df["Rollout_Score"] = rollout_score
+            df["Token"] = tokens
+            df["c"] = c_s
+            df["depth"] = depths
+            df["visit"] = visits
 
-            df.to_csv(dir_path+f"/tree{i}.csv", index=False)
+            df.to_csv(dir_path+f"./output/tree_save/tree{i}.csv", index=False, quoting=csv.QUOTE_NONNUMERIC)
+        """ stack = []
+        stack.extend(self.root.children)
+        sc = ""
+        score = [self.root.cum_score]
+        ids = [-1]
+        parent_id = [-1]
+        children_id = [str([c.id for c in self.root.children])]
+        infix = [sc]
+        rollout_smiles = ["Scaffold"]
+        rollout_score = [-10000]
 
-    def logging(self):
+        while len(stack) > 0:
+            c = stack.pop(-1)
+            for gc in c.children:
+                stack.append(gc)
+
+            # save information
+            score.append(c.cum_score)
+            ids.append(c.id)
+            parent_id.append(c.parent.id)
+            ch_id = [str(gc.id) for gc in c.children]
+            children_id.append(",".join(ch_id))
+            infix.append("".join(c.path))
+            rollout_smiles.append(c.rollout_result[0])
+            rollout_score.append(c.rollout_result[1])
+
+        df = pd.DataFrame(columns=["ID", "Score", "P_ID", "C_ID", "Infix", "Rollout_SMILES", "Rollout_Score"])
+        df["ID"] = ids
+        df["Score"] = score
+        df["P_ID"] = parent_id
+        df["C_ID"] = children_id
+        df["Infix"] = infix
+        df["Rollout_SMILES"] = rollout_smiles
+        df["Rollout_Score"] = rollout_score
+
+        df.to_csv(dir_path+f"/tree{0}.csv", index=False, quoting=csv.QUOTE_NONNUMERIC) """
+
+    def logging(self, compound, scores):
         """logging output compounds 
+        Input: 
+            - compound: valid compound 
+            - scores: reward scores correspond to the compound
+        Return: 
+            - Nothing        
         """
+        dataDir = hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"]
+        with open(dataDir + "present/scores.txt", "a") as f:
+            """ outStr = ""
+            for score in scores:
+                f.write(f"{score},")
+            f.write("\n") """
+            f.write(",".join(str(score) for score in scores)+"\n")
+        with open(dataDir+"present/ligands.txt", "a") as f:
+            f.write(compound+"\n")
+
         pass
 
+    def load_tree(self, dataDir: str):
+        """load tree from dir/output/tree_save/tree{}.csv
+        Input: 
+            - dataDir: path to dir
+
+        Return
+            - rootnode
+        """
+        self.root = RootNode()
+        files = 0
+        nodeDict = dict()
+        parentDict = dict()
+        childDict = dict()
+
+        while True:
+            if not os.path.exists(dataDir+f"./output/tree_save/tree{files}.csv"):
+                break
+            df = pd.read_csv(dataDir+f"./output/tree_save/tree{files}.csv")
+
+            for i in range(len(df)):
+                #df = pd.DataFrame(columns=["ID", "Score", "P_ID", "C_ID", "Infix", "Rollout_SMILES", "Rollout_Score", "Token","C"])
+                scores = "".join(df["Score"][i])[1:-1].split(",")
+                scores = list(map(lambda x:float(x), scores))
+
+                childIds = "".join(df["C_ID"][i])[1:-1].split(",")
+                childIds = list(map(lambda x: int(x), childIds)) if '' not in childIds else []
+                
+                if df["Token"][i] == "&&":
+                    n = RootNode(c = df["C"][i])
+                elif df["Token"][i] == "SCFD":
+                    n = ParentNode(scacffold=df["Rollout_SMILES"][i], c = df["C"][i])
+                else:
+                    n = NormalNode(df["Token"][i], c=df["C"][i])
+                path = "".join(df["Infix"][i])[1:-1].split(",")
+                path = list(map(lambda x:str(x).replace("\'","").replace(" ", ""), path))
+                n.path = path
+                n.id = int(df["ID"][i])
+                global id
+                id = max(id, n.id+1)
+                self.total_nodes = id
+                n.cum_score = scores
+                n.depth = df["depth"][i]# (columns=["ID", "Score", "P_ID", "C_ID", "Infix", "Rollout_SMILES", "Rollout_Score", "Token", "C", "depth","visit"])
+                n.visit = df["visit"][i]
+                rollout_smiles = df["Rollout_SMILES"][i]
+                rollout_scores = "".join(df["Rollout_Score"][i])[1:-1].split(",")
+                rollout_scores = list(map(lambda x: float(x), rollout_scores))
+                n.rollout_result = (rollout_smiles, rollout_scores)
+
+                nodeDict[int(df["ID"][i])] = n
+                parentDict[int(df["ID"][i])] = df["P_ID"][i]
+                childDict[int(df["ID"][i])] = childIds
+            files+=1
+        if files>0:
+            for i in nodeDict.keys():
+                if nodeDict[i].id == -1:
+                    self.root = nodeDict[i]
+                elif parentDict[i] == -1 :
+                    nodeDict[i].parent = self.root
+                    self.root.children.append(nodeDict[i])
+                else:
+                    nodeDict[i].parent = nodeDict[parentDict[i]]
+                for j in childDict[i]:
+                    nodeDict[i].children.append(nodeDict[j])
+            print(f"Loaded last {dataDir} with {files} csv file(s) ")
+        else:
+            print("NO FILES LOADED")
+        return self.root
+
+
+                
 
 # add for PMOO
 class Pareto():
@@ -617,6 +837,7 @@ class Pareto():
         """
         self.front = front if front is not None else [[0 for i in range(len(OmegaConf.structured(Config)["reward"]["reward_list"]))]]
         self.compounds = compounds
+        self.n_step = 0
     def initialization_front(self):
         if len(self.front) == 0:
             self.front = [[0 for i in range(len(OmegaConf.structured(Config)["reward"]["reward_list"]))]]
@@ -636,16 +857,17 @@ class Pareto():
             return True
         
         for p in self.front:
-            if np.all(np.array(p) < np.array(m)):
+            if np.any(np.array(p) < np.array(m)):
                 return True
         return False
     
-    def update(self, scores, compound):
+    def update(self, scores, compound, dataDir):
         """Update Pareto front with new compound
 
             Input:
                 - scores: reward score vector
                 - compound: thinking compound
+                - dataDir: save to outputDir
 
             Return:
                 - None
@@ -653,19 +875,17 @@ class Pareto():
         del_list = []
         "--Is 'scores' better than current pareto front?---"
         for k in range(len(self.front)):
-            flag = True
-            for i in range(len(self.front[k])):
+            """ for i in range(len(self.front[k])):
                 if(self.front[k][i] >= scores[i]):
-                    flag = False
-            if(flag):
+                    flag = False """
+            if np.all(np.less(np.array(self.front[k]), np.array(scores))):
                 del_list.append(k-len(del_list))
         for i in range(len(del_list)):
             del self.front[del_list[i]]
             del self.compounds[del_list[i]]
         self.front.append(scores)
         self.compounds.append(compound)
-        #TODO:;check dataDir works or not
-        dataDir = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]
+        #dataDir = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]
         with open(dataDir+"present/output.txt", 'a') as f:
             f.write(f"pareto size:{len(self.front)}\n")
             f.write(f"Updated pareto front\n{self.front}\n")
@@ -690,7 +910,7 @@ class Pareto():
         new_pareto.initialization_front()
         return new_pareto
 
-    def wcal(self, ucb, reward):
+    def wcal(self, ucb, reward, cnf):
         """Calculate HyperVolume
             Input: 
                 - ucb: Upper Confidence Bound
@@ -701,7 +921,7 @@ class Pareto():
 
         """
         
-        hv = self._hvcal(ucb)
+        hv = self._hvcal(ucb, cnf)
         if self.dominated(reward):
             return hv - self.distance(ucb)
         else:
@@ -722,10 +942,10 @@ class Pareto():
         distance = 0
         for i in range(len(avg)):
             distance += pow(avg[i] - ucb[i],2)
-        return sqrt(distance)
+        return np.sqrt(distance)
 
 
-    def _hvcal(self, ucb):
+    def _hvcal(self, ucb, cnf):
         """Calculate Hypervolume Indicator
             Input:
                 - ucb: Upper Confidence Bound
@@ -749,11 +969,16 @@ class Pareto():
         try:
             hvnum = hv.compute(ref_point)
         except:
-            with open(hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]+"./present/hverror_output.txt", 'a') as f:
+            with open(hydra.utils.get_original_cwd()+cnf["mcts"]["data_dir"]+"./present/hverror_output.txt", 'a') as f:
                 print(time.asctime( time.localtime(time.time()) ),file=f)
-                print(pareto.front,file=f)
+                print(self.front,file=f)
             return 0
         return hvnum
+    
+    def save_pareto(self, dataDir):
+        with open(dataDir+'present/pareto.json','w') as f:
+            json.dump(self.__dict__, f, indent=4, separators=(',', ': '))
+
 
 
 
@@ -781,43 +1006,52 @@ def main(cfg: DictConfig):
 
         reward = getReward(name=cfg["mcts"]["reward_name"])#, init_smiles=start_smiles)
         rewards = getRewards(nameList=cfg["reward"]["reward_list"])
+        for r in rewards:
+            if isinstance(r, DockingReward):
+                r.dataDir = hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]
         pareto = Pareto.from_dict(hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]+"/present/pareto.json")
         input_smiles = start_smiles
-        start = time.time()
+        """ start = time.time()
         for i in range(cfg["mcts"]["n_iter"]):
             #mcts = ParseSelectMCTS(input_smiles, model=model, vocab=vocab, Reward=reward,
             #                       max_seq=cfg["mcts"]["seq_len"], step=cfg["mcts"]["n_step"] * i,
             #                       n_valid=n_valid, n_invalid=n_invalid, c=cfg["mcts"]["ucb_c"], max_r=reward.max_r)
             mcts = ParseParetoSelectMCTS(input_smiles, model=model, vocab=vocab, Reward=rewards,
                                    max_seq=cfg["mcts"]["seq_len"], step=cfg["mcts"]["n_step"] * i,
-                                   n_valid=n_valid, n_invalid=n_invalid, c=cfg["mcts"]["ucb_c"], max_r=reward.max_r, Pareto = pareto)
-            mcts.search(n_step=cfg["mcts"]["n_step"] * (i + 1), epsilon=0, loop=10, rep_file=cfg["mcts"]["rep_file"])
+                                   n_valid=n_valid, n_invalid=n_invalid, c=cfg["mcts"]["ucb_c"], max_r=reward.max_r, Pareto = pareto, Config = cfg)
+            mcts.search(n_step=cfg["mcts"]["n_step"] * (i + 1), epsilon=0, loop=10, rep_file=cfg["mcts"]["rep_file"], isLoadTree=cfg["mcts"]["isLoadTree"])
             reward.max_r = mcts.max_score
             n_valid += mcts.n_valid
             n_invalid += mcts.n_invalid
             gen = sorted(mcts.valid_smiles.items(), key=lambda x: x[1], reverse=True)
-            input_smiles = gen[0][0].split(":")[1]
+            input_smiles = gen[0][0] if len(gen)>0 else start_smiles
         end = time.time()
-        print("Elapsed Time: %f" % (end-start))
+        print("Elapsed Time: %f" % (end-start)) """
+        mcts = ParseParetoSelectMCTS(input_smiles, model=model, vocab=vocab, Reward=rewards,
+                                   max_seq=cfg["mcts"]["seq_len"], 
+                                   n_valid=n_valid, n_invalid=n_invalid, c=cfg["mcts"]["ucb_c"], max_r=reward.max_r, Pareto = pareto, Config = cfg)
+        mcts.search_time(start_time = time.time(), time_limit_sec=cfg["mcts"]["time_limit_sec"],epsilon=0, loop=10, rep_file=cfg["mcts"]["rep_file"], isLoadTree=cfg["mcts"]["isLoadTree"])
 
-        generated_smiles = pd.DataFrame(columns=["SMILES", "Reward", "Imp", "MW", "step"])
-        start_reward = reward.reward(start_smiles)
+        generated_smiles = pd.DataFrame(columns=["SMILES", "Rewards", "Imp", "MW"])#, "step"])
+        start_reward = []
+        for reward in rewards:
+            start_reward.append(reward.reward(start_smiles))
         for kv in mcts.valid_smiles.items():
-            step, smi = kv[0].split(":")
-            step = int(step)
-
+            #step, smi = kv[0].split(":")
+            #step = int(step)
+            smi = kv[0]
             try:
                 w = Descriptors.MolWt(Chem.MolFromSmiles(smi))
             except:
                 w = 0
 
             generated_smiles.at[smi.rstrip('\n'), "SMILES"] = smi
-            generated_smiles.at[smi.rstrip('\n'), "Reward"] = kv[1]
-            generated_smiles.at[smi.rstrip('\n'), "Imp"] = kv[1] - start_reward
+            generated_smiles.at[smi.rstrip('\n'), "Rewards"] = kv[1]
+            generated_smiles.at[smi.rstrip('\n'), "Imp"] = np.array(kv[1]) - np.array(start_reward)
             generated_smiles.at[smi.rstrip('\n'), "MW"] = w
-            generated_smiles.at[smi.rstrip('\n'), "step"] = step
+            #generated_smiles.at[smi.rstrip('\n'), "step"] = step
 
-        generated_smiles = generated_smiles.sort_values("Reward", ascending=False)
+        generated_smiles = generated_smiles.sort_values("Rewards", ascending=False)
         generated_smiles.to_csv(hydra.utils.get_original_cwd() +
                                 cfg["mcts"]["out_dir"] + "No-{:04d}-{}.csv".format(n, start_smiles), index=False)
 

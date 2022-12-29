@@ -35,7 +35,7 @@ atoms = ["H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al",
          "[Sc]", "Ti", "V", "Cr", "[Mn]", "Fe", "[Co]", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr", "Rb",
          "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "[Sn]", "Sb", "Te", "I", "Xe"]
 
-
+id = -1
 class Node:
     def __init__(self):
         self.dimension = len(OmegaConf.structured(Config)["reward"]["reward_list"])
@@ -47,8 +47,10 @@ class Node:
         self.imm_score = list(np.zeros(self.dimension))
         self.cum_score = list(np.zeros(self.dimension))
         self.c = 1
-        self.id = -1
-        self.rollout_result = ("None", -1000)
+        global id
+        self.id = id
+        id +=1
+        self.rollout_result = ("None", [-1000 for r in range(self.dimension)])
 
     def add_Node(self, c):
         c.parent = self
@@ -66,10 +68,10 @@ class Node:
             #ucb = self.cum_score/self.visit + self.c*math.sqrt(2*math.log(self.parent.visit)/self.visit)
         return ucb
 
-    def select_children(self, pareto):
+    def select_children(self, pareto, cnf):
         children_ucb = []
         for cn in self.children:
-            children_ucb.append(pareto.wcal(cn._calc_UCB(), self.cum_score))## TODO: ERROR HERE
+            children_ucb.append(pareto.wcal(cn._calc_UCB(), self.cum_score, cnf))## TODO: ERROR HERE
         max_ind = np.random.choice(np.where(np.array(children_ucb) == max(children_ucb))[0])
         return self.children[max_ind]
 
@@ -81,6 +83,16 @@ class RootNode(Node):
         self.depth = 0
         self.path.append(self.token)
         self.c = c
+        self._varidate_id()
+
+    def _varidate_id(self):
+        """
+            ROOTNODE's id  MUST BE -1
+        """
+        global id
+        if self.id != -1:
+            id -= 1 # TODO: check here if tree csv is strange
+            self.id = -1
 
 
 class ParentNode(Node):
@@ -112,7 +124,13 @@ def convert_smiles(smiles, vocab, mode):
     converted = []
     if mode == "s2i":
         for token in smiles:
-            converted.append(vocab.index(token))
+            try:
+                ind = vocab.index(token)
+            except ValueError as e:
+                smiles.pop(smiles.index(token))
+                continue
+            finally:
+                converted.append(ind)
     elif mode == "i2s":
         for ind in smiles:
             converted.append(vocab[ind])

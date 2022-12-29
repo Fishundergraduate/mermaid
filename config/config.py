@@ -56,6 +56,8 @@ class MCTSConfig:
     model_dir: str = "/ckpt/"
     reward_name: str = "PLogP"
     data_dir: str = "/data_templete/"
+    isLoadTree: bool = False
+    time_limit_sec: int = 10*60
 
 @dataclass
 class RewardConfig:

@@ -26,6 +26,8 @@ import pandas as pd
 import subprocess
 import numpy as np
 
+import pdb
+
 def getReward(name):
     if name == "QED":
         return QEDReward()
@@ -33,6 +35,10 @@ def getReward(name):
         return PenalizedLogPReward()
     elif name == "Docking":
         return DockingReward()
+    elif name == "SigmoidDocking":
+        return SigmoidDockingReward()
+    elif name == "NonNormalizeDocking":
+        return NonNormalizedDockingReward()
     elif name == "Toxicity":
         return ToxicityReward()
     else:
@@ -126,13 +132,18 @@ class QEDReward(Reward):
 class DockingReward(Reward):
     def __init__(self, *args, **kwargs):
         super(DockingReward, self).__init__(*args, **kwargs)
-        self.vmin = -1
+        self.vmin = -20
         self.dataDir = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]
         self.proteinName = OmegaConf.structured(Config)["reward"]["protein_name"]
 
+    def _normalize(self, score: float) -> float:
+        base_dock_score = 0
+        return -round(((score - base_dock_score)*0.1)/(1+abs((score - base_dock_score)*0.1)),3)
     def reward(self, smiles):
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
+            #pdb.set_trace()
+            print("Docking: Vmin")
             score = self.vmin
             return score
         del mol
@@ -152,8 +163,6 @@ class DockingReward(Reward):
             cvt_cmd = ["obabel", self.dataDir+"workspace/ligand.smi" ,"-O",self.dataDir+"workspace/ligand.pdbqt" ,"--gen3D","-p"]
             subprocess.run(cvt_cmd, stdin=None, input=None, stdout=cvt_log, stderr=None, shell=False, timeout=300, check=False, universal_newlines=False)
             cvt_log.close()
-            score = self.vmin
-            return score
         except:
             f = open(self.dataDir+"present/error_output.txt", 'a')
             print("cvt_error: ", time.asctime( time.localtime(time.time()) ),file=f)
@@ -167,6 +176,9 @@ class DockingReward(Reward):
             vina_log.close()
             data = pd.read_csv(self.dataDir+'workspace/log_docking.txt', sep= "\t",header=None)
             score = round(float(data.values[-2][0].split()[1]),2)
+        except ValueError as ve:
+            print("Value Error"+smiles)
+            return self.vmin
         except:
             f = open(self.dataDir+"./present/error_output.txt", 'a')
             print("vina_error: ", time.asctime( time.localtime(time.time()) ),file=f)
@@ -177,7 +189,24 @@ class DockingReward(Reward):
         assert score < 10**10
 
         base_dock_score = 0
-        return -round(((score - base_dock_score)*0.1)/(1+abs((score - base_dock_score)*0.1)),3)
+        return self._normalize(score)
+
+class SigmoidDockingReward(DockingReward):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _normalize(self, score:float)-> float:
+        threshold = -5
+        return 1 / (1+ np.exp(score - threshold))
+
+class NonNormalizedDockingReward(DockingReward):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def _normalize(self, score: float)-> float:
+        return -score
 
 class ToxicityReward(Reward):
     def __init__(self, *args, **kwargs):
