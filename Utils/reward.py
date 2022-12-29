@@ -135,6 +135,7 @@ class DockingReward(Reward):
         self.vmin = -20
         self.dataDir = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]
         self.proteinName = OmegaConf.structured(Config)["reward"]["protein_name"]
+        self.proteinFile = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["reward"]["protein_dir"]
 
     def _normalize(self, score: float) -> float:
         base_dock_score = 0
@@ -171,7 +172,7 @@ class DockingReward(Reward):
         # docking simulation
         try:
             vina_log = open(self.dataDir+"workspace/log_docking.txt","w")
-            docking_cmd =["vina --config "+self.dataDir+"./input/"+self.proteinName+"_vina_config.txt --num_modes=1 --receptor="+self.dataDir+"./input/"+self.proteinName+".pdbqt --ligand="+self.dataDir+"./workspace/ligand.pdbqt"]#TODO: direct acess to protein file
+            docking_cmd =["vina --config "+self.proteinFile+self.proteinName+"_vina_config.txt --num_modes=1 --receptor="+self.proteinFile+self.proteinName+".pdbqt --ligand="+self.dataDir+"./workspace/ligand.pdbqt"]#TODO: direct acess to protein file
             subprocess.run(docking_cmd, stdin=None, input=None, stdout=vina_log, stderr=None, shell=True, timeout=600, check=False, universal_newlines=False)
             vina_log.close()
             data = pd.read_csv(self.dataDir+'workspace/log_docking.txt', sep= "\t",header=None)

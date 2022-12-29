@@ -342,6 +342,7 @@ class ParseParetoSelectMCTS(MCTS):
         self.l_replace = int(len(self.init_smiles)/4)
         self.pareto = Pareto
         self.Config = Config
+        self.sascore_threshold = Config["mcts"]["sascore_threshold"]
 
     def select(self):
         """
@@ -416,7 +417,7 @@ class ParseParetoSelectMCTS(MCTS):
             else:
                 smiles_concat = Chem.MolToSmiles(mol)
             sascore = calculateScore(mol)
-            if sascore <= 3.5:
+            if sascore <= self.sascore_threshold:
                 scores = []
                 for reward in self.Reward:
                     scores.append(reward.reward(smiles_concat))
@@ -507,7 +508,7 @@ class ParseParetoSelectMCTS(MCTS):
                         print(mol)
                         traceback.print_exc()
                         
-                    if sascore > 3.5:
+                    if sascore > self.sascore_threshold:
                         continue
                     scores = []
                     for reward in self.Reward:

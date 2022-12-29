@@ -58,10 +58,12 @@ class MCTSConfig:
     data_dir: str = "/data_templete/"
     isLoadTree: bool = False
     time_limit_sec: int = 10*60
+    sascore_threshold: float = 3.5
 
 @dataclass
 class RewardConfig:
     protein_name: str = "6lu7"+"_prepared"
+    protein_dir: str = "/Data/input/"
     reward_list: List[str] = field(default_factory=lambda: ['Docking', 'QED', 'Toxicity'])# choose from QED, PLogP, Docking, Toxicity
     etoxpred_model: str = "/Utils/etoxpred_best_model.joblib"
     
