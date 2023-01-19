@@ -64,7 +64,10 @@ class MCTSConfig:
 class RewardConfig:
     protein_name: str = "6lu7"+"_prepared"
     protein_dir: str = "/Data/input/"
-    reward_list: List[str] = field(default_factory=lambda: ['Docking', 'QED', 'Toxicity'])# choose from QED, PLogP, Docking, Toxicity
+    center: List[float] = field(default_factory=lambda: [-24.26, 14.02, 61.151])
+    box: List[float] = field(default_factory=lambda: [52, 66, 62])
+    spacing: float = 0.375
+    reward_list: List[str] = field(default_factory=lambda: ['Docking', 'QED', 'Toxicity'])# choose from QED, PLogP, Docking, Toxicity, SigmoidDocking, NonNormalizeDocking
     etoxpred_model: str = "/Utils/etoxpred_best_model.joblib"
     
 

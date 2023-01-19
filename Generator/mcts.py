@@ -617,7 +617,7 @@ class ParseParetoSelectMCTS(MCTS):
                 self.backprop()
             elapsed_time = time.time() - start_time
             one_epoch_time = max(time.time() - time_begin, one_epoch_time)
-
+        self.pareto.save_pareto(hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"])
 
     def set_repnode(self, rep_file=None):
         if len(rep_file) > 0:
@@ -976,9 +976,27 @@ class Pareto():
             return 0
         return hvnum
     
+    def _hv_prepare(self, _pareto_temp):
+        for i in range(len(_pareto_temp)):
+            for j in range(len(_pareto_temp[0])):
+                if(_pareto_temp[i][j]>0):
+                    _pareto_temp[i][j] *= -1
+                else:
+                    _pareto_temp[i][j] = -0.00000000000000001
+        return _pareto_temp
+    
     def save_pareto(self, dataDir):
         with open(dataDir+'present/pareto.json','w') as f:
             json.dump(self.__dict__, f, indent=4, separators=(',', ': '))
+
+    def greatest_contributor(self)->int:
+        _pareto_temp = copy.deepcopy(self.front)
+        _pareto_temp = self._hv_prepare(_pareto_temp)
+        hv = hypervolume(_pareto_temp)
+        ref_point = list(np.zeros_like(_pareto_temp[0]))
+        ind = hv.greatest_contributor(ref_point)
+        return ind
+        
 
 
 
@@ -1028,10 +1046,34 @@ def main(cfg: DictConfig):
             input_smiles = gen[0][0] if len(gen)>0 else start_smiles
         end = time.time()
         print("Elapsed Time: %f" % (end-start)) """
-        mcts = ParseParetoSelectMCTS(input_smiles, model=model, vocab=vocab, Reward=rewards,
-                                   max_seq=cfg["mcts"]["seq_len"], 
-                                   n_valid=n_valid, n_invalid=n_invalid, c=cfg["mcts"]["ucb_c"], max_r=reward.max_r, Pareto = pareto, Config = cfg)
-        mcts.search_time(start_time = time.time(), time_limit_sec=cfg["mcts"]["time_limit_sec"],epsilon=0, loop=10, rep_file=cfg["mcts"]["rep_file"], isLoadTree=cfg["mcts"]["isLoadTree"])
+        for i in range(cfg["mcts"]["n_iter"]):
+            mcts = ParseParetoSelectMCTS(
+                input_smiles,
+                model=model,
+                vocab=vocab,
+                Reward=rewards,
+                max_seq=cfg["mcts"]["seq_len"], 
+                n_valid=n_valid,
+                n_invalid=n_invalid,
+                c=cfg["mcts"]["ucb_c"],
+                max_r=reward.max_r,
+                Pareto = pareto,
+                Config = cfg)
+            mcts.search_time(
+                start_time = time.time(),
+                time_limit_sec=cfg["mcts"]["time_limit_sec"]//cfg["mcts"]["n_iter"],
+                epsilon=0,
+                loop=10,
+                rep_file=cfg["mcts"]["rep_file"],
+                isLoadTree=cfg["mcts"]["isLoadTree"])
+            ind = pareto.greatest_contributor()
+            __scr = copy.deepcopy(pareto.front[ind])
+            __smi = copy.deepcopy(pareto.compounds[ind])
+            pareto.initialization_front()
+            pareto.front.append(__scr)
+            pareto.compounds.append(__smi)
+            input_smiles = __smi
+            print(f"Finished step {i}, best {__smi}, score{__scr}")
 
         generated_smiles = pd.DataFrame(columns=["SMILES", "Rewards", "Imp", "MW"])#, "step"])
         start_reward = []
@@ -1055,6 +1097,8 @@ def main(cfg: DictConfig):
         generated_smiles = generated_smiles.sort_values("Rewards", ascending=False)
         generated_smiles.to_csv(hydra.utils.get_original_cwd() +
                                 cfg["mcts"]["out_dir"] + "No-{:04d}-{}.csv".format(n, start_smiles), index=False)
+        with open(hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]+"/input/next.smi","w") as f:
+            f.write(input_smiles)
 
 
 if __name__ == "__main__":

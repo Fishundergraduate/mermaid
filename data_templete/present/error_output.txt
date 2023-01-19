@@ -1,7 +1,0 @@
-cvt_error:  Sat Nov 19 16:57:58 2022
-vina_error:  Sat Nov 19 17:04:16 2022
-None
-vina_error:  Sat Nov 19 17:52:00 2022
-None
-vina_error:  Sat Nov 19 17:57:00 2022
-None

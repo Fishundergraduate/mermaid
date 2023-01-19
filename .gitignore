@@ -5,3 +5,5 @@ ckpt/*
 data*/*
 *.job.sh.*
 log*/*
+molOpt*/*
+glide.filter.sh.*

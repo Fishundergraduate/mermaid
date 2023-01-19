@@ -27,6 +27,8 @@ import subprocess
 import numpy as np
 
 import pdb
+from vina import Vina
+from meeko import MoleculePreparation, PDBQTMolecule
 
 def getReward(name):
     if name == "QED":
@@ -136,6 +138,10 @@ class DockingReward(Reward):
         self.dataDir = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]
         self.proteinName = OmegaConf.structured(Config)["reward"]["protein_name"]
         self.proteinFile = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["reward"]["protein_dir"]
+        self.vina = Vina(sf_name="vina", verbosity=0)
+        self.vina.set_receptor(self.proteinFile+self.proteinName+".pdbqt")
+        self.vina.compute_vina_maps(center = OmegaConf.structured(Config)["reward"]["center"], box_size=OmegaConf.structured(Config)["reward"]["box"], spacing=OmegaConf.structured(Config)["reward"]["spacing"])
+        self.molPrep = MoleculePreparation()
 
     def _normalize(self, score: float) -> float:
         base_dock_score = 0
@@ -147,10 +153,10 @@ class DockingReward(Reward):
             print("Docking: Vmin")
             score = self.vmin
             return score
-        del mol
+        #del mol
         # create SMILES file
-        with open(self.dataDir+'./workspace/ligand.smi','w') as f:
-            f.write(smiles)
+        """ with open(self.dataDir+'./workspace/ligand.smi','w') as f:
+            f.write(smiles) """
         # save produced ligands
         with open(self.dataDir+'./output/allLigands.txt','a', newline="\n") as f:
             f.write(smiles+"\n") 
@@ -160,10 +166,15 @@ class DockingReward(Reward):
         #  -h: protonation
         
         try:
-            cvt_log = open(self.dataDir+"workspace/cvt_log.txt","w")
+            """ cvt_log = open(self.dataDir+"workspace/cvt_log.txt","w")
             cvt_cmd = ["obabel", self.dataDir+"workspace/ligand.smi" ,"-O",self.dataDir+"workspace/ligand.pdbqt" ,"--gen3D","-p"]
             subprocess.run(cvt_cmd, stdin=None, input=None, stdout=cvt_log, stderr=None, shell=False, timeout=300, check=False, universal_newlines=False)
-            cvt_log.close()
+            cvt_log.close() """
+            mol = Chem.AddHs(mol)
+            AllChem.EmbedMolecule(mol)
+            self.molPrep.prepare(mol)
+            lig_pdbqt = self.molPrep.write_pdbqt_string()
+            self.vina.set_ligand_from_string(lig_pdbqt)
         except:
             f = open(self.dataDir+"present/error_output.txt", 'a')
             print("cvt_error: ", time.asctime( time.localtime(time.time()) ),file=f)
@@ -171,12 +182,15 @@ class DockingReward(Reward):
             f.close()
         # docking simulation
         try:
-            vina_log = open(self.dataDir+"workspace/log_docking.txt","w")
+            """ vina_log = open(self.dataDir+"workspace/log_docking.txt","w")
             docking_cmd =["vina --config "+self.proteinFile+self.proteinName+"_vina_config.txt --num_modes=1 --receptor="+self.proteinFile+self.proteinName+".pdbqt --ligand="+self.dataDir+"./workspace/ligand.pdbqt"]#TODO: direct acess to protein file
             subprocess.run(docking_cmd, stdin=None, input=None, stdout=vina_log, stderr=None, shell=True, timeout=600, check=False, universal_newlines=False)
             vina_log.close()
             data = pd.read_csv(self.dataDir+'workspace/log_docking.txt', sep= "\t",header=None)
-            score = round(float(data.values[-2][0].split()[1]),2)
+            score = round(float(data.values[-2][0].split()[1]),2) """
+            #self.vina.set_ligand_from_file(self.dataDir+"./workspace/ligand.pdbqt")
+            self.vina.dock(exhaustiveness=56, n_poses=1)
+            score = self.vina.score()[0]
         except ValueError as ve:
             print("Value Error"+smiles)
             return self.vmin
