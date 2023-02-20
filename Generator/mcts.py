@@ -412,8 +412,10 @@ class ParseParetoSelectMCTS(MCTS):
             if mol is None:
                 #delKeyList.append(list(self.next_token.keys())[i])
                 #continue
+                self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                 return #TODO: check this code to delKey
             elif not isinstance(mol, Chem.rdchem.Mol):
+                self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                 return
             else:
                 smiles_concat = Chem.MolToSmiles(mol)
@@ -441,6 +443,7 @@ class ParseParetoSelectMCTS(MCTS):
                     self.n_valid += 1
                 else:
                     # print("NO", smiles_concat)
+                    self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                     self.n_invalid += 1
 
         if len(self.next_token) < 1:
@@ -496,10 +499,12 @@ class ParseParetoSelectMCTS(MCTS):
                     mol = Chem.MolFromSmiles(smiles_concat)
                     if mol is None:
                         delKeyList.append(list(self.next_token.keys())[i])
+                        self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                         continue
                     else:
                         smiles_concat = Chem.MolToSmiles(mol)
                     if not isinstance(smiles_concat, str):
+                        self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                         continue
                     #score = self.Reward.reward(smiles_concat)
                     try:
@@ -508,8 +513,14 @@ class ParseParetoSelectMCTS(MCTS):
                         import traceback
                         print(mol)
                         traceback.print_exc()
-                        
+
+                    #Ring Penalty bigger 7 atom
+                    ssr = Chem.GetSymmSSSR(mol)
+                    if np.any(np.array(list(map(len, ssr)))>=7):
+                        self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
+                        continue
                     if sascore > self.sascore_threshold:
+                        self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                         continue
                     scores = []
                     for reward in self.Reward:
@@ -536,6 +547,7 @@ class ParseParetoSelectMCTS(MCTS):
                         self.n_valid += 1
                     else:
                         # print("NO", smiles_concat)
+                        self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                         self.n_invalid += 1
             for key in delKeyList:
                 self.next_token.pop(key)
@@ -562,7 +574,7 @@ class ParseParetoSelectMCTS(MCTS):
         #print(f"[pdb]:{self.next_token.keys()}\t values:{self.next_token.values()}")
         if len(self.next_token) < 1:
             return
-        max_reward = list(np.max(np.array(list(self.next_token.values())), axis=0))
+        max_reward = list(np.mean(np.array(list(self.next_token.values())), axis=0)) # Changed to mean from max
         # self.max_score = max(self.max_score, max_reward)
         while self.current_node is not None:
             self.current_node.visit += 1
@@ -834,19 +846,20 @@ class ParseParetoSelectMCTS(MCTS):
 class Pareto():
     """ParetoFront Class
     """
-    def __init__(self, front=[], compounds=[]):
+    def __init__(self, front=[], compounds=[], cfg:DictConfig =None):
         """Constructor
         
             Input
                 - front: reward score vectors in pareto front
                 - compounds: compounds in pareto front
         """
-        self.front = front if front is not None else [[0 for i in range(len(OmegaConf.structured(Config)["reward"]["reward_list"]))]]
+        self.CONFIG = cfg
+        self.front = front if front is not None else [[0 for i in range(len(self.CONFIG["reward"]["reward_list"]))]]
         self.compounds = compounds
         self.n_step = 0
     def initialization_front(self):
         if len(self.front) == 0:
-            self.front = [[0 for i in range(len(OmegaConf.structured(Config)["reward"]["reward_list"]))]]
+            self.front = [[0 for i in range(len(self.CONFIG["reward"]["reward_list"]))]]
             self.compounds = ["cc"]
 
     def dominated(self, m):
@@ -865,6 +878,8 @@ class Pareto():
         for p in self.front:
             if np.any(np.array(p) < np.array(m)):
                 return True
+            if np.all(np.array(p) >= np.array(m)):
+                return False
         return False
     
     def update(self, scores, compound, dataDir):
@@ -900,7 +915,7 @@ class Pareto():
         print(f"pareto size:{len(self.front)}")
     
     @staticmethod
-    def from_dict(_filename):
+    def from_dict(_filename, cfg: DictConfig):
         """Pareto front backup from files
             WARNING: you should check _filename file exists
             Input:
@@ -911,7 +926,7 @@ class Pareto():
         """
         with open(_filename, 'r') as f:
             _set_json = json.load(f)
-            new_pareto = Pareto(front= _set_json['front'], compounds= _set_json['compounds'])
+            new_pareto = Pareto(front= _set_json['front'], compounds= _set_json['compounds'], cfg =cfg)
         print("Loaded Pareto Fronts")
         new_pareto.initialization_front()
         return new_pareto
@@ -992,7 +1007,13 @@ class Pareto():
     
     def save_pareto(self, dataDir):
         with open(dataDir+'present/pareto.json','w') as f:
-            json.dump(self.__dict__, f, indent=4, separators=(',', ': '))
+            json.dump(self.__dict__, f, indent=4, separators=(',', ': '), default = self.__def_serialize)
+
+    def __def_serialize(self, obj):
+        if isinstance(obj, object):
+            return None
+        raise TypeError("Unsupport")
+
 
     def greatest_contributor(self)->int:
         _pareto_temp = copy.deepcopy(self.front)
@@ -1033,7 +1054,7 @@ def main(cfg: DictConfig):
         for r in rewards:
             if isinstance(r, DockingReward):
                 r.dataDir = hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]
-        pareto = Pareto.from_dict(hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]+"/present/pareto.json")
+        pareto = Pareto.from_dict(hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]+"/present/pareto.json", cfg)
         input_smiles = start_smiles
         """ start = time.time()
         for i in range(cfg["mcts"]["n_iter"]):
