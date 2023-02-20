@@ -41,6 +41,10 @@ def getReward(name):
         return SigmoidDockingReward()
     elif name == "NonNormalizeDocking":
         return NonNormalizedDockingReward()
+    elif name == "ScaledDocking":
+        return ScaledDockingReward()
+    elif name == "SquareDocking":
+        return SquaredDockingReward()
     elif name == "Toxicity":
         return ToxicityReward()
     else:
@@ -219,10 +223,28 @@ class NonNormalizedDockingReward(DockingReward):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        #self.scalor = OmegaConf.structured(Config)["reward"]["scalor"]
     
     def _normalize(self, score: float)-> float:
-        return -score
+        return -score#/self.scalor
+class ScaledDockingReward(DockingReward):
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        #self.scalor = OmegaConf.structured(Config)["reward"]["scalor"]
+    
+    def _normalize(self, score: float)-> float:
+        #return -score/self.scalor
+        return -score/10
+class SquaredDockingReward(DockingReward):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        #self.scalor = OmegaConf.structured(Config)["reward"]["scalor"]
+    
+    def _normalize(self, score: float)-> float:
+        #return -score/self.scalor
+        return score**2
 class ToxicityReward(Reward):
     def __init__(self, *args, **kwargs):
         super(ToxicityReward, self).__init__(*args, **kwargs)

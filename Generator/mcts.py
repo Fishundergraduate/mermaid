@@ -615,6 +615,7 @@ class ParseParetoSelectMCTS(MCTS):
             if len(self.next_token) != 0:
                 self.simulate()
                 self.backprop()
+            self.save_tree(hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"])
             elapsed_time = time.time() - start_time
             one_epoch_time = max(time.time() - time_begin, one_epoch_time)
         self.pareto.save_pareto(hydra.utils.get_original_cwd()+self.Config["mcts"]["data_dir"])
@@ -648,6 +649,9 @@ class ParseParetoSelectMCTS(MCTS):
         save to dataDir/output/tree_save/tree{}.csv
         Return null
         """
+        import shutil,os
+        shutil.rmtree(dir_path+"output/tree_save")
+        os.mkdir(dir_path+"output/tree_save")
         for i in range(len(self.root.children)):
             stack = []
             stack.extend(self.root.children[i].children)

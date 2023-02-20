@@ -7,3 +7,5 @@ data*/*
 log*/*
 molOpt*/*
 glide.filter.sh.*
+Data/output/*
+*.prof
