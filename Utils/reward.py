@@ -29,29 +29,28 @@ import numpy as np
 import pdb
 from vina import Vina
 from meeko import MoleculePreparation, PDBQTMolecule
-
-def getReward(name):
+def getReward(name, cfg):
     if name == "QED":
         return QEDReward()
     elif name == "PLogP":
         return PenalizedLogPReward()
     elif name == "Docking":
-        return DockingReward()
+        return DockingReward(cfg)
     elif name == "SigmoidDocking":
-        return SigmoidDockingReward()
+        return SigmoidDockingReward(cfg)
     elif name == "NonNormalizeDocking":
-        return NonNormalizedDockingReward()
+        return NonNormalizedDockingReward(cfg)
     elif name == "ScaledDocking":
-        return ScaledDockingReward()
+        return ScaledDockingReward(cfg)
     elif name == "SquareDocking":
-        return SquaredDockingReward()
+        return SquaredDockingReward(cfg)
     elif name == "Toxicity":
-        return ToxicityReward()
+        return ToxicityReward(cfg)
     else:
         raise NotImplementedError()
 
-def getRewards(nameList: list):
-    return [getReward(name) for name in nameList]
+def getRewards(nameList: list,cfg :DictConfig):
+    return [getReward(name, cfg) for name in nameList]
 
 class Reward:
     def __init__(self):
@@ -136,15 +135,15 @@ class QEDReward(Reward):
         return score
 
 class DockingReward(Reward):
-    def __init__(self, *args, **kwargs):
+    def __init__(self,cfg, *args, **kwargs):
         super(DockingReward, self).__init__(*args, **kwargs)
         self.vmin = -20
-        self.dataDir = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["mcts"]["data_dir"]
-        self.proteinName = OmegaConf.structured(Config)["reward"]["protein_name"]
-        self.proteinFile = hydra.utils.get_original_cwd()+OmegaConf.structured(Config)["reward"]["protein_dir"]
+        self.dataDir = hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]
+        self.proteinName = cfg["reward"]["protein_name"]
+        self.proteinFile = hydra.utils.get_original_cwd()+cfg["reward"]["protein_dir"]
         self.vina = Vina(sf_name="vina", verbosity=0)
         self.vina.set_receptor(self.proteinFile+self.proteinName+".pdbqt")
-        self.vina.compute_vina_maps(center = OmegaConf.structured(Config)["reward"]["center"], box_size=OmegaConf.structured(Config)["reward"]["box"], spacing=OmegaConf.structured(Config)["reward"]["spacing"])
+        self.vina.compute_vina_maps(center = cfg["reward"]["center"], box_size=cfg["reward"]["box"], spacing=cfg["reward"]["spacing"])
         self.molPrep = MoleculePreparation()
 
     def _normalize(self, score: float) -> float:
@@ -223,7 +222,7 @@ class NonNormalizedDockingReward(DockingReward):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        #self.scalor = OmegaConf.structured(Config)["reward"]["scalor"]
+        #self.scalor = cfg["reward"]["scalor"]
     
     def _normalize(self, score: float)-> float:
         return -score#/self.scalor
@@ -231,7 +230,7 @@ class ScaledDockingReward(DockingReward):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        #self.scalor = OmegaConf.structured(Config)["reward"]["scalor"]
+        #self.scalor = cfg["reward"]["scalor"]
     
     def _normalize(self, score: float)-> float:
         #return -score/self.scalor
@@ -240,16 +239,16 @@ class SquaredDockingReward(DockingReward):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        #self.scalor = OmegaConf.structured(Config)["reward"]["scalor"]
+        #self.scalor = cfg["reward"]["scalor"]
     
     def _normalize(self, score: float)-> float:
         #return -score/self.scalor
         return score**2
 class ToxicityReward(Reward):
-    def __init__(self, *args, **kwargs):
+    def __init__(self,cfg, *args, **kwargs):
         super(ToxicityReward, self).__init__(*args, **kwargs)
         self.vmin = 0
-        self.model = load(hydra.utils.get_original_cwd()+ OmegaConf.structured(Config)["reward"]["etoxpred_model"])
+        self.model = load(hydra.utils.get_original_cwd()+ cfg["reward"]["etoxpred_model"])
 
     def reward(self, smiles):
         mol = Chem.MolFromSmiles(smiles)

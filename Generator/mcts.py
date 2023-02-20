@@ -31,6 +31,7 @@ import json
 # Load Configure
 from omegaconf import DictConfig, OmegaConf
 from config.config import Config
+from hydra.utils import instantiate
 # calc for pareto
 from pygmo import hypervolume
 import math
@@ -335,13 +336,13 @@ class ParseParetoSelectMCTS(MCTS):
                  n_invalid=0, sampling_max=False, max_r=-1000):
         super(ParseParetoSelectMCTS, self).__init__(init_smiles, model, vocab, Reward, max_seq, c, num_prll, limit, step, n_valid,
                  n_invalid, sampling_max, max_r)
-        self.root = RootNode()
         self.current_node = None
         self.next_token = {}
         self.rollout_result = {}
         self.l_replace = int(len(self.init_smiles)/4)
         self.pareto = Pareto
         self.Config = Config
+        self.root = RootNode(c=1/np.sqrt(2), cfg = instantiate(Config))
         self.sascore_threshold = Config["mcts"]["sascore_threshold"]
 
     def select(self):
@@ -542,7 +543,7 @@ class ParseParetoSelectMCTS(MCTS):
 
     def backprop(self):
         for i, key in enumerate(self.next_token.keys()):
-            child = NormalNode(key, c=self.c)
+            child = NormalNode(key, c=self.c, cfg=self.Config)
             child.id = self.total_nodes
             self.total_nodes += 1
             try:
@@ -623,9 +624,9 @@ class ParseParetoSelectMCTS(MCTS):
     def set_repnode(self, rep_file=None):
         if len(rep_file) > 0:
             for smiles in read_smilesset(hydra.utils.get_original_cwd()+rep_file):
-                n = ParentNode(smiles)
+                n = ParentNode(smiles, cfg=self.Config)
                 self.root.add_Node(n)
-                c = NormalNode("&")
+                c = NormalNode("&", cfg=self.Config)
                 n.add_Node(c)
         else:
             for i in range(self.l_replace+1):
@@ -637,9 +638,9 @@ class ParseParetoSelectMCTS(MCTS):
                     sc = prefix + "(*)" + suffix
                     mol_sc = Chem.MolFromSmiles(sc)
                     if mol_sc is not None:
-                        n = ParentNode(prefix + "(*)" + suffix)
+                        n = ParentNode(prefix + "(*)" + suffix, cfg=self.Config)
                         self.root.add_Node(n)
-                        c = NormalNode("&")
+                        c = NormalNode("&", cfg=self.Config)
                         n.add_Node(c)
 
     def save_tree(self, dir_path):
@@ -766,7 +767,7 @@ class ParseParetoSelectMCTS(MCTS):
         Return
             - rootnode
         """
-        self.root = RootNode()
+        self.root = RootNode(c=1/np.sqrt(2), cfg = self.Config)
         files = 0
         nodeDict = dict()
         parentDict = dict()
@@ -786,11 +787,11 @@ class ParseParetoSelectMCTS(MCTS):
                 childIds = list(map(lambda x: int(x), childIds)) if '' not in childIds else []
                 
                 if df["Token"][i] == "&&":
-                    n = RootNode(c = df["C"][i])
+                    n = RootNode(c = df["C"][i], cfg=self.Config)
                 elif df["Token"][i] == "SCFD":
-                    n = ParentNode(scacffold=df["Rollout_SMILES"][i], c = df["C"][i])
+                    n = ParentNode(scacffold=df["Rollout_SMILES"][i], c = df["C"][i], cfg=self.Config)
                 else:
-                    n = NormalNode(df["Token"][i], c=df["C"][i])
+                    n = NormalNode(df["Token"][i], c=df["C"][i], cfg=self.Config)
                 path = "".join(df["Infix"][i])[1:-1].split(",")
                 path = list(map(lambda x:str(x).replace("\'","").replace(" ", ""), path))
                 n.path = path
@@ -1027,8 +1028,8 @@ def main(cfg: DictConfig):
         model.load_state_dict(torch.load(hydra.utils.get_original_cwd() + cfg["mcts"]["model_dir"]
                                          + f"model-ep{model_ver}.pth",  map_location=torch.device('cpu')))
 
-        reward = getReward(name=cfg["mcts"]["reward_name"])#, init_smiles=start_smiles)
-        rewards = getRewards(nameList=cfg["reward"]["reward_list"])
+        reward = getReward(name=cfg["mcts"]["reward_name"],cfg=instantiate(cfg))#, init_smiles=start_smiles)
+        rewards = getRewards(nameList=cfg["reward"]["reward_list"],cfg=instantiate(cfg))
         for r in rewards:
             if isinstance(r, DockingReward):
                 r.dataDir = hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]

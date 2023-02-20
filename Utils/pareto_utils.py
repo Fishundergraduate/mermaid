@@ -37,8 +37,8 @@ atoms = ["H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al",
 
 id = -1
 class Node:
-    def __init__(self):
-        self.dimension = len(OmegaConf.structured(Config)["reward"]["reward_list"])
+    def __init__(self, cfg: DictConfig):
+        self.dimension = len(cfg["reward"]["reward_list"])
         self.parent = None
         self.path = []
         self.depth = -100
@@ -77,8 +77,8 @@ class Node:
 
 
 class RootNode(Node):
-    def __init__(self, c=1/np.sqrt(2)):
-        super().__init__()
+    def __init__(self, c=1/np.sqrt(2), *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.token = "&&"
         self.depth = 0
         self.path.append(self.token)
@@ -96,16 +96,16 @@ class RootNode(Node):
 
 
 class ParentNode(Node):
-    def __init__(self, scacffold, c=1/np.sqrt(2)):
-        super().__init__()
+    def __init__(self, scacffold, c=1/np.sqrt(2), *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.original_smiles = scacffold
         self.token = "SCFD"
         self.c = c
 
 
 class NormalNode(Node):
-    def __init__(self, token, c=1/np.sqrt(2)):
-        super().__init__()
+    def __init__(self, token, c=1/np.sqrt(2), *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.token = token
         self.c = c
 
