@@ -1,7 +1,5 @@
 {
-    "front": [
-        [0,0,0]
-    ],
+    "front": null,
     "compounds": ["CC"],
     "n_step": 1000
 }

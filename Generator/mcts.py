@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 
 import rdkit.Chem as Chem
 from rdkit import RDLogger
-from rdkit.Chem import Descriptors
+from rdkit.Chem import Descriptors, AllChem
 RDLogger.DisableLog('rdApp.*')
 from rdkit.six.moves import cPickle
 
@@ -36,6 +36,7 @@ from hydra.utils import instantiate
 from pygmo import hypervolume
 import math
 import copy
+import pygmo as pg
 
 # for debug
 import pdb
@@ -344,6 +345,8 @@ class ParseParetoSelectMCTS(MCTS):
         self.Config = Config
         self.root = RootNode(c=1/np.sqrt(2), cfg = instantiate(Config))
         self.sascore_threshold = Config["mcts"]["sascore_threshold"]
+        self.tanimoto_threshold = Config["mcts"]["tanimoto_threshold"]
+        self.init_fp = AllChem.GetMorganFingerprintAsBitVect(Chem.MolFromSmiles(init_smiles),2,2048)
 
     def select(self):
         """
@@ -412,15 +415,18 @@ class ParseParetoSelectMCTS(MCTS):
             if mol is None:
                 #delKeyList.append(list(self.next_token.keys())[i])
                 #continue
-                self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
+                #self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                 return #TODO: check this code to delKey
             elif not isinstance(mol, Chem.rdchem.Mol):
-                self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
+                #self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                 return
             else:
                 smiles_concat = Chem.MolToSmiles(mol)
             sascore = calculateScore(mol)
-            if sascore <= self.sascore_threshold:
+            
+            fp = AllChem.GetMorganFingerprintAsBitVect(mol,2,2048)
+            tanimoto = Chem.DataStructs.TanimotoSimilarity(fp,self.init_fp)
+            if sascore <= self.sascore_threshold and tanimoto > self.tanimoto_threshold:
                 scores = []
                 for reward in self.Reward:
                     scores.append(reward.reward(smiles_concat))
@@ -443,7 +449,7 @@ class ParseParetoSelectMCTS(MCTS):
                     self.n_valid += 1
                 else:
                     # print("NO", smiles_concat)
-                    self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
+                    #self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                     self.n_invalid += 1
 
         if len(self.next_token) < 1:
@@ -516,10 +522,15 @@ class ParseParetoSelectMCTS(MCTS):
 
                     #Ring Penalty bigger 7 atom
                     ssr = Chem.GetSymmSSSR(mol)
+                    fp = AllChem.GetMorganFingerprintAsBitVect(mol,2,2048)
+                    tanimoto = Chem.DataStructs.TanimotoSimilarity(fp,self.init_fp)
                     if np.any(np.array(list(map(len, ssr)))>=7):
                         self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                         continue
                     if sascore > self.sascore_threshold:
+                        self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
+                        continue
+                    if tanimoto < self.tanimoto_threshold:
                         self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                         continue
                     scores = []
@@ -869,18 +880,18 @@ class Pareto():
                 - m: reward vector to decide dominated or not
 
             Return
-                - True: Dominated
-                - False: Non-dominated
+                - False: Dominated
+                - True: Non-dominated (in pareto front)
         """
         if len(self.front) == 0:
             return True
         
         for p in self.front:
-            if np.any(np.array(p) < np.array(m)):
+            if np.all(np.array(p) < np.array(m)):
                 return True
-            if np.all(np.array(p) >= np.array(m)):
+            if np.all(np.array(p) > np.array(m)):
                 return False
-        return False
+        return True
     
     def update(self, scores, compound, dataDir):
         """Update Pareto front with new compound
@@ -1092,7 +1103,8 @@ def main(cfg: DictConfig):
                 loop=10,
                 rep_file=cfg["mcts"]["rep_file"],
                 isLoadTree=cfg["mcts"]["isLoadTree"])
-            ind = pareto.greatest_contributor()
+            ind = pg.select_best_N_mo(pareto.front, 1)[0]#pareto.greatest_contributor() ##TODO: change
+            ##TODO:  Must be passed AizynthFinder
             __scr = copy.deepcopy(pareto.front[ind])
             __smi = copy.deepcopy(pareto.compounds[ind])
             pareto.initialization_front()

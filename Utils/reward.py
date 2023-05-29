@@ -46,6 +46,8 @@ def getReward(name, cfg):
         return SquaredDockingReward(cfg)
     elif name == "Toxicity":
         return ToxicityReward(cfg)
+    elif name == "Const":
+        return ConstantReward()
     else:
         raise NotImplementedError()
 
@@ -261,3 +263,11 @@ class ToxicityReward(Reward):
         tmpX = np.array(list(fp_string),dtype=float)
         tox_score = self.model.predict_proba(tmpX.reshape((1,1024)))[:,1]
         return 1 - tox_score[0]
+class ConstantReward(Reward):
+    def __init__(self, *args, **kwargs):
+        super(ConstantReward, self).__init__(*args, **kwargs)
+        self.vmin = -100
+        return
+    
+    def reward(self, smiles):
+        return .5

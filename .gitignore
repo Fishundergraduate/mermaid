@@ -6,6 +6,8 @@ data*/*
 *.job.sh.*
 log*/*
 molOpt*/*
-glide.filter.sh.*
+glide.filter.sh*
+glide.filter.2.sh*
 Data/output/*
 *.prof
+memo_for_private.md

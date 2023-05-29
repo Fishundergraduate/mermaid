@@ -59,6 +59,7 @@ class MCTSConfig:
     isLoadTree: bool = False
     time_limit_sec: int = 10*60
     sascore_threshold: float = 3.5
+    tanimoto_threshold: float = 0.0
 
 @dataclass
 class RewardConfig:
