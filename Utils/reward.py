@@ -44,10 +44,14 @@ def getReward(name, cfg):
         return ScaledDockingReward(cfg)
     elif name == "SquareDocking":
         return SquaredDockingReward(cfg)
-    elif name == "Toxicity":
+    elif name == "Toxicity" :
         return ToxicityReward(cfg)
+    elif name == "ConstToxicity" :
+        return ToxicityConstReward(cfg)
     elif name == "Const":
         return ConstantReward()
+    elif name == "TPSA":
+        return TPSAReward()
     else:
         raise NotImplementedError()
 
@@ -151,7 +155,8 @@ class DockingReward(Reward):
     def _normalize(self, score: float) -> float:
         base_dock_score = 0
         return -round(((score - base_dock_score)*0.1)/(1+abs((score - base_dock_score)*0.1)),3)
-    def reward(self, smiles):
+    
+    def dock(self, smiles):
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             #pdb.set_trace()
@@ -194,7 +199,7 @@ class DockingReward(Reward):
             data = pd.read_csv(self.dataDir+'workspace/log_docking.txt', sep= "\t",header=None)
             score = round(float(data.values[-2][0].split()[1]),2) """
             #self.vina.set_ligand_from_file(self.dataDir+"./workspace/ligand.pdbqt")
-            self.vina.dock(exhaustiveness=56, n_poses=1)
+            self.vina.dock(exhaustiveness=8, n_poses=4)
             score = self.vina.score()[0]
         except ValueError as ve:
             print("Value Error"+smiles)
@@ -208,17 +213,21 @@ class DockingReward(Reward):
             return score
         assert score < 10**10
 
-        base_dock_score = 0
-        return self._normalize(score)
+        #base_dock_score = 0
+        return score
+
+    def reward(self, smiles):
+        return self._normalize(self.dock(smiles))
 
 class SigmoidDockingReward(DockingReward):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, cfg, *args, **kwargs):
+        super().__init__(cfg)
+        __init_smi = cfg['mcts']['in_smiles_file']
+        self.threshold = self.dock(__init_smi)
 
     def _normalize(self, score:float)-> float:
-        threshold = -5
-        return 1 / (1+ np.exp(score - threshold))
+        return 1 / (1+ np.exp(score - self.threshold))
 
 class NonNormalizedDockingReward(DockingReward):
 
@@ -263,6 +272,23 @@ class ToxicityReward(Reward):
         tmpX = np.array(list(fp_string),dtype=float)
         tox_score = self.model.predict_proba(tmpX.reshape((1,1024)))[:,1]
         return 1 - tox_score[0]
+class ToxicityConstReward(Reward):
+    def __init__(self,cfg):
+        super(ToxicityConstReward, self).__init__()
+        self.vmin = cfg["reward"]["toxicity_threshold"]
+        self.model = load(hydra.utils.get_original_cwd()+ cfg["reward"]["etoxpred_model"])
+
+    def reward(self, smiles):
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return -1
+        
+        mol = Chem.AddHs(mol)
+        fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=1024)
+        fp_string = fp.ToBitString()
+        tmpX = np.array(list(fp_string),dtype=float)
+        tox_score = self.model.predict_proba(tmpX.reshape((1,1024)))[:,1]
+        return 0. if (1 - tox_score) <= self.vmin else 1.
 class ConstantReward(Reward):
     def __init__(self, *args, **kwargs):
         super(ConstantReward, self).__init__(*args, **kwargs)
@@ -271,3 +297,15 @@ class ConstantReward(Reward):
     
     def reward(self, smiles):
         return .5
+class TPSAReward(Reward):
+    def __init__(self, *args, **kwargs):
+        super(TPSAReward, self).__init__(*args, **kwargs)
+        self.vmin = -100
+        return
+    def reward(self, smiles):
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return 0
+        tpsa = Descriptors.TPSA(mol)
+        return tpsa
+

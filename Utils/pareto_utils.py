@@ -62,7 +62,8 @@ class Node:
     #@hydra
     def _calc_UCB(self):
         if self.visit == 0:
-            ucb = [1e+6 for i in range(self.dimension)]
+            #ucb = [1e+6 for i in range(self.dimension)]
+            ucb = [win for win in self.cum_score]
         else:
             ucb = [win/self.visit + math.sqrt(2*math.log(self.visit)/ self.visit) for win in self.cum_score ]
             #ucb = self.cum_score/self.visit + self.c*math.sqrt(2*math.log(self.parent.visit)/self.visit)

@@ -4,6 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 import argparse
 import os
+from rdkit import Chem
 
 parser = argparse.ArgumentParser()
 parser.add_argument('dataDir')
@@ -26,7 +27,10 @@ find.filter_policy.select("uspto")
     cols=["d","q"]
     df3.loc[(df3[cols]>0.8).all(axis=1)].to_csv(f"{dataDir}/present/merge.csv",index=False)
  """
-df = pd.read_csv(f"{dataDir}/present/more0.8.txt",header=None,names=["smi","d","q"])
+#df = pd.read_csv(f"{dataDir}/present/more0.8.txt",names=["smi","d","q"])
+#df = pd.read_csv(f"{dataDir}/present/glide.passed_2.csv",header=0)#,names=["smi","g","d","q"])
+#df = pd.read_csv(f"{dataDir}/present/glide.passed_0606.csv",header=0)#,names=["smi","g","d","q"])
+df = pd.read_csv(f"{dataDir}/present/glide.passed_219_118.csv",header=0)
 #print(df.head)
 #dfA = pd.DataFrame()
 if df.shape[0] < n:
@@ -40,13 +44,15 @@ for i, ent in tqdm(df.iterrows()):
         find.stock.select("namiki")
         find.expansion_policy.select("uspto")
         find.filter_policy.select("uspto")
+    if Chem.MolFromSmiles(ent.smi) is None:
+        continue
     find.target_smiles=ent.smi
     find.tree_search()#show_progress=True)
     find.build_routes()
     if find.extract_statistics()["is_solved"]:
         print(ent.smi)
         with open(f"{dataDir}/present/aizy.pass.csv",'a') as fo:
-            fo.write(f"{ent.smi}, {ent.d}, {ent.q}\n")
+            fo.write(f"{ent.smi}, {ent.g}, {ent.d}, {ent.q}\n")
             fo.flush()
         #dfA = pd.concat([dfA, ent])
         #break

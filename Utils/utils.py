@@ -11,7 +11,7 @@ from rdkit.six.moves import cPickle
 
 
 import torch
-
+LANG_MODE="SELFIES"#or not
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Vocabulary
@@ -195,7 +195,10 @@ def read_smilesset(path):
 
 
 if __name__ == "__main__":
-    smiles_list = read_smilesset("Data/250k_rndm_zinc_drugs_clean.smi")
+    if LANG_MODE is not None:
+        smiles_list = read_smilesset("Data/zinc_250k_selfies.sfi")
+    else:  
+        smiles_list = read_smilesset("Data/250k_rndm_zinc_drugs_clean.smi")
     vocab = []
     for smiles in tqdm(smiles_list):
         p = parse_smiles(smiles)

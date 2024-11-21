@@ -7,7 +7,10 @@ data*/*
 log*/*
 molOpt*/*
 glide.filter.sh*
-glide.filter.2.sh*
+glide.filter*.sh*
 Data/output/*
 *.prof
 memo_for_private.md
+aizy.sh*
+5zyk_hit/*
+A[1-5].job.sh

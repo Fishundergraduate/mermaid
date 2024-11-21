@@ -328,7 +328,7 @@ class ParseSelectMCTS(MCTS):
             df["Rollout_SMILES"] = rollout_smiles
             df["Rollout_Score"] = rollout_score
 
-            df.to_csv(dir_path+f"/tree{i}.csv", index=False)
+            #df.to_csv(dir_path+f"/tree{i}.csv", index=False)
 
 class ParseParetoSelectMCTS(MCTS):
     """Pareto Multi-objective optimization Monte Carlo Tree Search class
@@ -347,6 +347,7 @@ class ParseParetoSelectMCTS(MCTS):
         self.sascore_threshold = Config["mcts"]["sascore_threshold"]
         self.tanimoto_threshold = Config["mcts"]["tanimoto_threshold"]
         self.init_fp = AllChem.GetMorganFingerprintAsBitVect(Chem.MolFromSmiles(init_smiles),2,2048)
+        self.base_fp = AllChem.GetMorganFingerprintAsBitVect(Chem.MolFromSmiles(init_smiles),2,2048)
 
     def select(self):
         """
@@ -424,8 +425,20 @@ class ParseParetoSelectMCTS(MCTS):
                 smiles_concat = Chem.MolToSmiles(mol)
             sascore = calculateScore(mol)
             
+            mid = self.current_node.parent.rollout_result[-2]
+            if mid in 'None':
+                parent_fp = self.init_fp
+            else:
+                parent_smiles_concat = pref + trans_infix_ringnumber(pref,mid) + suf
+                parent_mol = Chem.MolFromSmiles(parent_smiles_concat)
+                if not isinstance(parent_mol, Chem.rdchem.Mol):
+                    #self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
+                    return
+                parent_fp = AllChem.GetMorganFingerprintAsBitVect(parent_mol,2,2048)
             fp = AllChem.GetMorganFingerprintAsBitVect(mol,2,2048)
-            tanimoto = Chem.DataStructs.TanimotoSimilarity(fp,self.init_fp)
+            #tanimoto = Chem.DataStructs.TanimotoSimilarity(fp,self.init_fp)
+            tanimoto = Chem.DataStructs.TanimotoSimilarity(fp,parent_fp)
+            print("[Debug]: L440: tanimoto sim: ",tanimoto)
             if sascore <= self.sascore_threshold and tanimoto > self.tanimoto_threshold:
                 scores = []
                 for reward in self.Reward:
@@ -522,8 +535,23 @@ class ParseParetoSelectMCTS(MCTS):
 
                     #Ring Penalty bigger 7 atom
                     ssr = Chem.GetSymmSSSR(mol)
+            
+
+                    mid = self.current_node.parent.rollout_result[-2]
+                    if mid in 'None':
+                        parent_fp = self.init_fp
+                    else:
+                        parent_smiles_concat = pref + trans_infix_ringnumber(pref,mid) + suf
+                        parent_mol = Chem.MolFromSmiles(parent_smiles_concat)
+                        if not isinstance(parent_mol, Chem.rdchem.Mol):
+                            self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
+                            continue
+                        parent_fp = AllChem.GetMorganFingerprintAsBitVect(parent_mol,2,2048)
+                    
                     fp = AllChem.GetMorganFingerprintAsBitVect(mol,2,2048)
-                    tanimoto = Chem.DataStructs.TanimotoSimilarity(fp,self.init_fp)
+                    #tanimoto = Chem.DataStructs.TanimotoSimilarity(fp,self.init_fp)
+                    tanimoto = Chem.DataStructs.TanimotoSimilarity(fp,parent_fp)
+                    print("[Debug]: L440: tanimoto sim: ",tanimoto)
                     if np.any(np.array(list(map(len, ssr)))>=7):
                         self.next_token[list(self.next_token.keys())[i]] = [-1 for r in range(len(self.Reward))]
                         continue
@@ -724,7 +752,7 @@ class ParseParetoSelectMCTS(MCTS):
             df["depth"] = depths
             df["visit"] = visits
 
-            df.to_csv(dir_path+f"./output/tree_save/tree{i}.csv", index=False, quoting=csv.QUOTE_NONNUMERIC)
+            #df.to_csv(dir_path+f"./output/tree_save/tree{i}.csv", index=False, quoting=csv.QUOTE_NONNUMERIC)
         """ stack = []
         stack.extend(self.root.children)
         sc = ""
@@ -760,7 +788,7 @@ class ParseParetoSelectMCTS(MCTS):
         df["Rollout_SMILES"] = rollout_smiles
         df["Rollout_Score"] = rollout_score
 
-        df.to_csv(dir_path+f"/tree{0}.csv", index=False, quoting=csv.QUOTE_NONNUMERIC) """
+        #df.to_csv(dir_path+f"/tree{0}.csv", index=False, quoting=csv.QUOTE_NONNUMERIC) """
 
     def logging(self, compound, scores):
         """logging output compounds 
@@ -1134,7 +1162,7 @@ def main(cfg: DictConfig):
 
         generated_smiles = generated_smiles.sort_values("Rewards", ascending=False)
         generated_smiles.to_csv(hydra.utils.get_original_cwd() +
-                                cfg["mcts"]["out_dir"] + "No-{:04d}-{}.csv".format(n, start_smiles), index=False)
+                                cfg["mcts"]["out_dir"] + "No-{:04d}-{}.csv".format(n, start_smiles.replace("/","_")), index=False)
         with open(hydra.utils.get_original_cwd()+cfg["mcts"]["data_dir"]+"/input/next.smi","w") as f:
             f.write(input_smiles)
 

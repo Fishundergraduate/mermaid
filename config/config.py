@@ -71,6 +71,7 @@ class RewardConfig:
     reward_list: List[str] = field(default_factory=lambda: ['Docking', 'QED', 'Toxicity'])# choose from QED, PLogP, Docking, Toxicity, SigmoidDocking, NonNormalizeDocking
     etoxpred_model: str = "/Utils/etoxpred_best_model.joblib"
     scalor: float = 1 # scale indicator for nonormal docking
+    toxicity_threshold: float = 0.5
     
 
 

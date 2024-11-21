@@ -1,7 +1,7 @@
 import pandas as pd
 import glob,re,os
 from tqdm import tqdm
-paths = glob.glob("data*/present/filtered.csv")
+paths = glob.glob("log_5zdp_2d_2/concat*/present/more0.8.txt")
 for dataDir in tqdm(paths):
     if False:
         df = pd.read_csv(dataDir+"/present/ligands.txt",names=["smi"])
@@ -17,7 +17,7 @@ for dataDir in tqdm(paths):
         df = df.sort_index()
         df.to_csv(dataDir+"/present/dup_pareto.csv",index=False,header=False)
     if True:
-        df = pd.read_csv(dataDir)#,header=True)
+        df = pd.read_csv(dataDir,header=None,names=["smi","d","q"])
         df = df.sort_values(["d"])
         df = df.drop_duplicates(subset=["smi"],keep="last")
         df = df.sort_index()
