@@ -65,10 +65,10 @@ class MCTSConfig:
 class RewardConfig:
     protein_name: str = "6lu7"+"_prepared"
     protein_dir: str = "/Data/input/"
-    center: List[float] = field(default_factory=lambda: [-24.26, 14.02, 61.151])
-    box: List[float] = field(default_factory=lambda: [52, 66, 62])
+    center: list = field(default_factory=lambda: [-24.26, 14.02, 61.151])
+    box: list = field(default_factory=lambda: [52, 66, 62])
     spacing: float = 0.375
-    reward_list: List[str] = field(default_factory=lambda: ['Docking', 'QED', 'Toxicity'])# choose from QED, PLogP, Docking, Toxicity, SigmoidDocking, NonNormalizeDocking
+    reward_list: list = field(default_factory=lambda: ['Docking', 'QED', 'Toxicity'])# choose from QED, PLogP, Docking, Toxicity, SigmoidDocking, NonNormalizeDocking
     etoxpred_model: str = "/Utils/etoxpred_best_model.joblib"
     scalor: float = 1 # scale indicator for nonormal docking
     toxicity_threshold: float = 0.5
@@ -77,11 +77,11 @@ class RewardConfig:
 
 @dataclass
 class Config:
-    prep: PreProcess = PreProcess()
-    model: ModelConfig = ModelConfig()
-    train: TrainConfig = TrainConfig()
-    mcts: MCTSConfig = MCTSConfig()
-    reward: RewardConfig = RewardConfig()
+    prep: PreProcess = field(default_factory=PreProcess)
+    model: ModelConfig = field(default_factory=ModelConfig)
+    train: TrainConfig = field(default_factory=TrainConfig)
+    mcts: MCTSConfig = field(default_factory=MCTSConfig)
+    reward: RewardConfig = field(default_factory=RewardConfig)
 
 
 cs = ConfigStore.instance()
