@@ -1,24 +1,13 @@
-#!/bin/zsh
+#!/bin/bash
 #$ -cwd
 #$ -t 1-5:1
-#$ -l f_node=1
+#$ -l node_q=1
 #$ -l h_rt=24:00:00
-source /etc/profile.d/modules.sh
-module load cuda/11.2.146 cudnn/8.1
-date
-#bash init.sh
-#source .venv/bin/activate
-source ~/.zshrc
-conda activate mermaid
-export HYDRA_FULL_ERROR=1
-#nvidia-smi --query-gpu=timestamp,name,utilization.gpu,utilization.memory,memory.used,memory.free,memory.used --format=csv -l 10 &>gpu.log &
-python Generator/mcts.py mcts.data_dir="/data$SGE_TASK_ID/" mcts.isLoadTree=True mcts.time_limit_sec=$((23*60*60+30*60)) mcts.n_iter=1 reward.reward_list="['NonNormalizeDocking', 'QED', 'Toxicity']" reward.scalor=10
-#echo $SGE_TASK_ID
+source ~/.bashrc
+module load miniconda cuda/12.1
+
+eval  "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+conda activate mermaid-cuda121
+export PROT=$1
+python Generator/mcts.py mcts.data_dir="/data_$PROT/data$SGE_TASK_ID/" mcts.isLoadTree=True mcts.time_limit_sec=$((23*60*60+30*60)) mcts.n_iter=1 reward.reward_list="['Docking', 'QED', 'Toxicity']" reward.scalor=10 mcts.in_smiles_file="/Data/input/CC.smi" reward.protein_name=$1"_prepared" reward.center="[-5.086, 14.329, 69.900]" reward.box="[16,20,20]" reward.spacing=1.000
 conda deactivate
-#deactivate
-if [ $SGE_TASK_ID -eq 1 ]; then
-curl -X POST https://maker.ifttt.com/trigger/JOB_FINISH/with/key/bD0xPz0Ajd2SWn6JVoww3w/
-fi
-echo finish
-date
-#mv ligand_design.0.job.sh.* log$1d_normal
