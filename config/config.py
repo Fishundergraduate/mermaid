@@ -52,7 +52,7 @@ class MCTSConfig:
     modeL_dir: str = "/ckpt/"
     out_dir: str = "/Data/output/" # TODO: merge to data_dir
     ucb_c: float = 1/math.sqrt(2)
-    model_ver: int = 100
+    model_ver: int = 90
     model_dir: str = "/ckpt/"
     reward_name: str = "PLogP"
     data_dir: str = "/data_templete/"
